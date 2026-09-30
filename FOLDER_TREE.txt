@@ -1,0 +1,66 @@
+revovfirmware/
+├── Context_v3.md
+├── esp_Context_v1.md
+├── Mega_Context_v1.md
+├── FOLDER_TREE.txt
+├── README.md
+├── .gitignore
+├── shared/
+│   └── RevoVProtocol.h
+├── esp/
+│   ├── platformio.ini
+│   └── src/
+│       ├── main.cpp
+│       ├── Config.h
+│       ├── Net/
+│       │   ├── WebSocket.h
+│       │   └── WebSocket.cpp
+│       ├── Order/
+│       │   ├── OrderTypes.h
+│       │   ├── OrderQueue.h
+│       │   ├── OrderQueue.cpp
+│       │   ├── Inventory.h
+│       │   └── Inventory.cpp
+│       ├── Trajectory/
+│       │   ├── ActionStep.h
+│       │   ├── Planner.h
+│       │   └── Planner.cpp
+│       ├── Protocol/
+│       │   ├── PinDriver.h
+│       │   ├── PinDriver.cpp
+│       │   ├── ReadyHandler.h
+│       │   └── ReadyHandler.cpp
+│       └── Core/
+│           ├── StateMachine.h
+│           ├── StateMachine.cpp
+│           ├── Scheduler.h
+│           └── Scheduler.cpp
+└── mega/
+    ├── platformio.ini
+    └── src/
+        ├── main.cpp
+        ├── Config.h
+        ├── Protocol/
+        │   ├── PinReader.h
+        │   └── PinReader.cpp
+        ├── Motion/
+        │   ├── StepperAxis.h
+        │   ├── StepperAxis.cpp
+        │   ├── Axes.h
+        │   └── Axes.cpp
+        ├── EndEffector/
+        │   ├── Gripper.h
+        │   ├── Gripper.cpp
+        │   ├── Door.h
+        │   └── Door.cpp
+        ├── Shelf/
+        │   ├── Conveyor.h
+        │   └── Conveyor.cpp
+        ├── Homing/
+        │   ├── Home.h
+        │   └── Home.cpp
+        └── Core/
+            ├── StateMachine.h
+            ├── StateMachine.cpp
+            ├── Scheduler.h
+            └── Scheduler.cpp

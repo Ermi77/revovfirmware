@@ -6,8 +6,8 @@ RevoV vending machine firmware — **ESP32 (brain)** + **Arduino Mega (motion sl
 
 | Board | Role | Talks to |
 |---|---|---|
-| **ESP32** (`esp32_revoV/`) | Cloud brain — WebSocket, order queue, trajectory planning | DB via Wi-Fi · Mega via 5+1 wires |
-| **Mega** (`mega_revoV/`) | Dumb motion slave — steppers, gripper, door, conveyors | ESP only |
+| **ESP32** (`esp32/`) | Cloud brain — WebSocket, order queue, trajectory planning | DB via Wi-Fi · Mega via 5+1 wires |
+| **Mega** (`mega/`) | Dumb motion slave — steppers, gripper, door, conveyors | ESP only |
 
 **One contract:** `shared/RevoVProtocol.h` — the only file both boards compile.
 **Never change it on one side only.**
@@ -21,20 +21,21 @@ text
 - ESP sends **one command at a time**, waits for **READY**, sends next.
 - Mega never decides anything — just executes and pulses READY when settled.
 - Order = array of triplets: `(shelfId 1–5, quantity 1–10, startSlot 0–9)`.
-- 8 commands per drink (see `RevoV_Context_v3.md §5`).
+- 8 commands per drink (see `Context_v3.md §5`).
 - After 10 slots → ESP sends conveyor-advance command.
 
 ## Repo layout
 revovfirmware/
 ├── README.md ← you are here
-├── RevoV_Context_v3.md ← system truth (ESP + Mega + DB)
-├── RevoV_Mega_Context_v1.md ← Mega-side truth (pins, motors, states)
+├── Context_v3.md ← system truth (ESP + Mega + DB)
+├── Mega_Context_v1.md ← Mega-side truth (pins, motors, states)
+├── esp_Context_v1.md ← ESP-side truth
 ├── shared/
 │ └── RevoVProtocol.h ← compiled by BOTH boards
-├── esp32_revoV/ ← PlatformIO project 1
+├── esp32/ ← PlatformIO project 1
 │ ├── platformio.ini
 │ └── src/{main.cpp, Config.h, Net/, Order/, Trajectory/, Protocol/, Core/}
-└── mega_revoV/ ← PlatformIO project 2
+└── mega/ ← PlatformIO project 2
 ├── platformio.ini
 └── src/{main.cpp, Config.h, Protocol/, Motion/, EndEffector/, Shelf/, Homing/, Core/}
 
@@ -52,7 +53,7 @@ pio run -e megaatmega2560 -t upload
 Start coding
 Every session begins with:
 
-Read RevoV_Context_v3.md (system) and RevoV_Mega_Context_v1.md (Mega),
+Read Context_v3.md (system) and Mega_Context_v1.md (Mega),
 then implement <module>.
 
 Milestones (Mega): M1 PinReader → M2 StepperAxis → M3 Axes → M4 Gripper →
