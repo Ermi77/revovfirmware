@@ -19,5 +19,6 @@ Order sm_activeOrder();
 uint8_t sm_drinkIndex();
 uint8_t sm_stepIndex();
 const char* sm_stateName();
+const char* sm_stateName(State state);
 
 }  // namespace revov

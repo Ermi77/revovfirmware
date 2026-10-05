@@ -28,14 +28,16 @@ Order activeOrder{0, 0, 0, ""};
 ActionStep steps[8]{};
 uint8_t stepCount = 0;
 
-const char* stateName() {
-    switch (state) {
+const char* stateName(State value) {
+    switch (value) {
     case State::DISPATCHING: return "DISPATCHING";
     case State::WAITING_FOR_READY: return "WAITING_FOR_READY";
     case State::ERROR: return "ERROR";
     default: return "IDLE";
     }
 }
+
+const char* stateName() { return stateName(state); }
 
 bool parseNumber(const char* text, long& value) {
     if (!text || !*text) return false;
@@ -390,5 +392,6 @@ Order sm_activeOrder() { return activeOrder; }
 uint8_t sm_drinkIndex() { return drinkIndex; }
 uint8_t sm_stepIndex() { return stepIndex; }
 const char* sm_stateName() { return stateName(); }
+const char* sm_stateName(State value) { return stateName(value); }
 
 }  // namespace revov
