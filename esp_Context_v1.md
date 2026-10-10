@@ -13,7 +13,7 @@ servos.
 struct Order {
     uint8_t shelfId;    // 1..5
     uint8_t quantity;   // 1..255
-    uint8_t startSlot;  // 0..9
+    uint8_t startSlot;  // 1..10
     char orderId[32];   // network acknowledgement identity
 };
 ```
@@ -30,24 +30,33 @@ step
 reset
 sim on
 sim off
+led auto
+led on
+led off
+stall on
+stall off
 ```
 
 The parser rejects invalid shelf IDs, quantities, and start slots. Quantity is
-not capped by the ten slots in one row: the planner inserts conveyor advances
-whenever the shelf slot counter passes 9.
+not capped by the slots in one row: the planner inserts conveyor advances
+whenever the shelf slot counter passes 10 (the row serves slots 1 through 10
+before wrapping). Slot 0 is the dedicated dispensing area at a corner of the
+third shelf and is never a valid pickup location.
 
 ## End-to-end runtime
 
 `main.cpp` maintains WSS, polls network orders, handles serial lines, calls
 `sm_update()`, prints changed-only status, and logs heap usage every five
 minutes. `StateMachine.cpp` starts queued orders, dispatches planned
-primitives, waits for READY, updates inventory, and completes orders.
+primitives, waits for READY, updates inventory, and completes orders. A
+completed order prints an `ORDER COMPLETE` banner and auto-starts the next
+queued order.
 
 One drink expands to:
 
 ```text
 (X, slot)
-(Y, shelfId - 1)
+(Y, shelfId)
 (Y, 6) PICK
 (Y, 3)
 (X, 0)
@@ -56,8 +65,8 @@ One drink expands to:
 (Y, 9) DOOR CLOSE
 ```
 
-For shelf 5, a row rollover emits `(Y,14)`. If the final drink ends at slot 9,
-the rollover is emitted after that drink so the next order starts at slot 0.
+For shelf 5, a row rollover emits `(Y,14)`. If the final drink ends at slot 10,
+the rollover is emitted after that drink so the next order starts at slot 1.
 
 ## Network and reliability behavior
 
@@ -70,7 +79,9 @@ failure episode, and the guard resets after WSS connects successfully.
 Production WSS requires `WEBSOCKET_CA_CERT`. An empty certificate is refused
 outside SIM_MODE. JSON uses fixed-size buffers. Bluetooth is disabled during
 ESP32 setup. The state machine uses a 30-second READY timeout, three retries
-per drink, and a five-minute active-order timeout.
+per drink (each retry restarts the drink from step 1 at the same slot), and a
+five-minute active-order timeout. The `stall on` command suppresses the
+simulated READY to exercise the timeout/retry/halt path.
 
 Successful and failed network drinks can publish:
 
@@ -95,6 +106,7 @@ esp/
     ├── main.cpp
     ├── Config.h
     ├── Net/WebSocket.h/.cpp
+    ├── Web/Ui.h/.cpp, Pages.h
     ├── Order/OrderTypes.h
     ├── Order/OrderQueue.h/.cpp
     ├── Order/Inventory.h/.cpp
@@ -102,7 +114,8 @@ esp/
     ├── Trajectory/Planner.h/.cpp
     ├── Protocol/PinDriver.h/.cpp
     ├── Protocol/ReadyHandler.h/.cpp
-    └── Core/StateMachine.h/.cpp, Scheduler.h/.cpp
+    └── Core/StateMachine.h/.cpp, Scheduler.h/.cpp,
+        EventBus.h/.cpp, StateTracker.h/.cpp
 ```
 
 ## Not yet written or validated

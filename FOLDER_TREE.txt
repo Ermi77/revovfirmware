@@ -15,6 +15,10 @@ revovfirmware/
 │       ├── Net/
 │       │   ├── WebSocket.h
 │       │   └── WebSocket.cpp
+│       ├── Web/
+│       │   ├── Ui.h
+│       │   ├── Ui.cpp
+│       │   └── Pages.h
 │       ├── Order/
 │       │   ├── OrderTypes.h
 │       │   ├── OrderQueue.h
@@ -34,7 +38,11 @@ revovfirmware/
 │           ├── StateMachine.h
 │           ├── StateMachine.cpp
 │           ├── Scheduler.h
-│           └── Scheduler.cpp
+│           ├── Scheduler.cpp
+│           ├── EventBus.h
+│           ├── EventBus.cpp
+│           ├── StateTracker.h
+│           └── StateTracker.cpp
 └── mega/
     ├── platformio.ini
     └── src/

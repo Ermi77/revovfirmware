@@ -46,9 +46,10 @@ lines for replay or comparison with `Context_v3.md` section 2.
 1. **T1 worked example:** feed `(X,4)`, `(Y,4)`, `(Y,6)`, `(Y,3)`,
    `(X,0)`, `(Y,8)`, `(Y,7)`, `(Y,9)`, then repeat the same sequence with
    `(X,5)`. Each command must produce one `ready_pulse`, in order.
-2. **T2 overflow:** after a slot sequence crosses 9, send
-   `(Y,10+shelfId)`. The trace must show one conveyor dispatch and motion,
-   one READY pulse, then the next slot command.
+2. **T2 overflow:** after the slot sequence reaches slot 10, send
+   `(Y, 9+shelfId)` — the conveyor code for that shelf. The trace must
+   show one conveyor dispatch and motion, one READY pulse, then the
+   next slot command (slot 1).
 3. **T3 unknown code:** `(Y,15)` must produce `cmd`, `dispatch` with
    `unknown`, and one `ready_pulse`, with no motion events.
 4. **T4 debounce:** change DIR/DATA and change them again before 5 ms.

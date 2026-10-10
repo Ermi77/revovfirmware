@@ -12,4 +12,7 @@ bool pd_waitReady(uint32_t timeoutMs);
 bool pd_readyReceived();
 void pd_setSimulation(bool enabled);
 bool pd_isSimulation();
+void pd_setStall(bool enabled);
+void pd_setLed(bool on);
+void pd_signalReady();
 }  // namespace revov

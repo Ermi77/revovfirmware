@@ -11,8 +11,8 @@ orders, inventory, WSS, or backend state.
 
 | Axis | Hardware | Meaning |
 | --- | --- | --- |
-| X | One stepper | Shelf slot position, 0-9 |
-| Y | Two steppers in lockstep | Shelf height, 0-4 |
+| X | One stepper | Shelf slot position, 0-10 (0 = dispensing area) |
+| Y | Two steppers in lockstep | Shelf height, 1-5 |
 | Z | Servo | 0 degrees retract, 90 degrees extend |
 | Gripper | Servo | 0 degrees release, 90 degrees grip by default |
 | Door | Servo | 0 degrees close, 90 degrees open |
@@ -40,8 +40,8 @@ DISPENSE_SWITCH
 
 | DIR | DATA | Meaning |
 | ---: | ---: | --- |
-| 0 | 0-9 | Move X to slot |
-| 1 | 0-4 | Move Y to zero-indexed shelf |
+| 0 | 0-10 | Move X to slot (0 = dispensing area) |
+| 1 | 1-5 | Move Y to shelf |
 | 1 | 6 | PICK |
 | 1 | 7 | PLACE |
 | 1 | 8 | Door open |

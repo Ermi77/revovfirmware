@@ -79,7 +79,7 @@ void execute(char* text) {
     if (!strcmp(op, "HOME")) { home_all(); begin(); return; }
     if (!strcmp(op, "X") && number(a)) {
         const uint8_t slot = atoi(a);
-        if (slot >= SLOTS_PER_SHELF) { error(F("x slot")); return; }
+        if (slot > SLOT_LAST) { error(F("x slot")); return; }
         ax_moveX(slot); begin(); return;
     }
     if ((!strcmp(op, "XF") || !strcmp(op, "XB")) && number(a)) {
@@ -89,7 +89,7 @@ void execute(char* text) {
     if (!strcmp(op, "Y") && number(a)) {
         const uint8_t shelf = atoi(a);
         if (shelf == 15) { home_all(); begin(); return; }
-        if (shelf >= SHELF_COUNT) { error(F("y shelf")); return; }
+        if (shelf < SHELF_FIRST || shelf > SHELF_LAST) { error(F("y shelf")); return; }
         ax_moveY(shelf); begin(); return;
     }
     if ((!strcmp(op, "YF") || !strcmp(op, "YB")) && number(a)) {

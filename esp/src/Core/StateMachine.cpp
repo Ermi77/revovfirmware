@@ -6,14 +6,23 @@
 #include "../Order/OrderQueue.h"
 #include "../Protocol/PinDriver.h"
 #include "../Trajectory/Planner.h"
+#include "EventBus.h"
 #include "Scheduler.h"
+#include "StateTracker.h"
 
 #include <Arduino.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 namespace revov {
 namespace {
+
+// The conveyor advance is dispatched as step 9, past
+// the eight drink steps, so its trace line carries no
+// /8 denominator.
+constexpr uint8_t CONVEYOR_STEP = 9;
+
 State state = State::IDLE;
 bool autoRun = false;
 bool haveActive = false;
@@ -24,9 +33,24 @@ uint8_t retryCount = 0;
 uint8_t stepIndex = 0;
 uint32_t readyDeadline = 0;
 uint32_t lastProgressMs = 0;
+uint32_t dispatchTime = 0;
+uint32_t conveyorAdvances = 0;
 Order activeOrder{0, 0, 0, ""};
-ActionStep steps[8]{};
+Cmd steps[8]{};
 uint8_t stepCount = 0;
+bool manualPending = false;
+uint8_t manualDir = 0;
+uint8_t manualData = 0;
+bool manualReadyPending = false;
+
+// SIM_MODE pick routine: the atomic PICK primitive
+// expanded into the manipulator's internal sequence —
+// extend, pick, retract — so the operator gates each
+// phase with the READY button.
+uint8_t routine[3]{};
+uint8_t routineCount = 0;
+uint8_t routineIndex = 0;
+bool routineActive = false;
 
 const char* stateName(State value) {
     switch (value) {
@@ -55,8 +79,8 @@ bool validOrder(const Order& order, const char*& errorText) {
         errorText = "quantity must be 1..255";
         return false;
     }
-    if (order.startSlot >= SLOTS_PER_SHELF) {
-        errorText = "startSlot must be 0..9";
+    if (order.startSlot < SLOT_FIRST || order.startSlot > SLOT_LAST) {
+        errorText = "startSlot must be 1..10";
         return false;
     }
     return true;
@@ -84,8 +108,8 @@ bool parseTriplet(char* text, Order& order, const char*& errorText) {
         errorText = "quantity must be 1..255";
         return false;
     }
-    if (startSlot < 0 || startSlot >= SLOTS_PER_SHELF) {
-        errorText = "startSlot must be 0..9";
+    if (startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
+        errorText = "startSlot must be 1..10";
         return false;
     }
     order = {};
@@ -95,6 +119,73 @@ bool parseTriplet(char* text, Order& order, const char*& errorText) {
     return validOrder(order, errorText);
 }
 
+// Per-drink outcome funnel. Publishes to the backend
+// when the WSS link is up; the event bus carries the
+// outcome to the web console as a JSON-only drink_ok
+// event, so nothing is printed here.
+void publishDrinkOutcome(const char* orderId, uint8_t drinkIndex,
+                         const char* status) {
+    if (ws_isConnected()) {
+        ws_publishDrinkOutcome(orderId, drinkIndex, status);
+    }
+}
+
+// The one order-intake funnel. Every door (serial console, sim
+// web page, WSS backend) validates and enqueues through here so
+// the range checks, the halted guard, and the queue-full guard
+// live in exactly one place.
+const char* submitOrder(uint8_t shelfId, uint8_t quantity,
+                        uint8_t startSlot, const char* orderId) {
+    if (state == State::ERROR) {
+        return "machine halted; send reset";
+    }
+    if (shelfId < 1 || shelfId > SHELF_COUNT) {
+        return "shelfId must be 1..5";
+    }
+    if (quantity < 1 || quantity > MAX_ORDER_QUANTITY) {
+        return "quantity must be 1..255";
+    }
+    if (startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
+        return "startSlot must be 1..10";
+    }
+    if (oq_size() >= ORDER_QUEUE_CAPACITY) {
+        return "order queue full";
+    }
+    Order order{};
+    order.shelfId = shelfId;
+    order.quantity = quantity;
+    order.startSlot = startSlot;
+    if (orderId && *orderId) {
+        strncpy(order.orderId, orderId, sizeof(order.orderId) - 1);
+        order.orderId[sizeof(order.orderId) - 1] = '\0';
+    }
+    oq_enqueueOrder(order);
+    return nullptr;
+}
+
+// Shared reset body: clears queue and inventory, drops any active
+// order, and returns to IDLE. Callers report their own outcome.
+void resetMachine() {
+    oq_clear();
+    inv_resetAll();
+    haveActive = false;
+    conveyorPending = false;
+    conveyorAdvances = 0;
+    autoRun = false;
+    manualPending = false;
+    manualReadyPending = false;
+    routineActive = false;
+    routineCount = 0;
+    routineIndex = 0;
+    state = State::IDLE;
+    st_noteReset();
+#if SMART_PLANNER
+    // Reset doubles as the ESP-side home analogue:
+    // the position is unknown until a move settles.
+    pl_resetTracking();
+#endif
+}
+
 bool busy() { return state == State::DISPATCHING || state == State::WAITING_FOR_READY; }
 
 void noteProgress() { lastProgressMs = millis(); }
@@ -102,7 +193,7 @@ void noteProgress() { lastProgressMs = millis(); }
 void printHelp() {
     Serial.println(F("help"));
     Serial.println(F("order <shelfId> <quantity> <startSlot> [; shelfId quantity startSlot ...]"));
-    Serial.println(F("status | run | step | reset | sim on | sim off"));
+    Serial.println(F("status | run | step | reset | sim on | sim off | led on | led off"));
 }
 
 void printStatus() {
@@ -126,11 +217,23 @@ void printStatus() {
     Serial.print(haveActive ? drinkIndex + 1 : 0);
     Serial.print(F(" step="));
     Serial.print(stepIndex);
+    Serial.print(F(" x="));
+    Serial.print(st_x());
+    Serial.print(F(" y="));
+    Serial.print(st_y());
+    Serial.print(F(" z="));
+    Serial.print(st_zName());
+    Serial.print(F(" door="));
+    Serial.print(st_doorName());
+    Serial.print(F(" led="));
+    Serial.print(st_ledColorName());
     Serial.print(F(" nextSlot="));
     for (uint8_t shelf = 1; shelf <= SHELF_COUNT; ++shelf) {
         if (shelf > 1) Serial.print(',');
         Serial.print(inv_nextSlot(shelf));
     }
+    Serial.print(F(" conv="));
+    Serial.print(conveyorAdvances);
     Serial.println();
 }
 
@@ -138,10 +241,14 @@ void startNextOrder() {
     if (haveActive || !oq_hasNext()) return;
     activeOrder = oq_peek();
     inv_setNextSlot(activeOrder.shelfId, activeOrder.startSlot);
+    eb_orderStart(activeOrder.shelfId, activeOrder.quantity,
+                  activeOrder.startSlot);
+    eb_nextSlot(activeOrder.shelfId, activeOrder.startSlot);
     drinkIndex = 0;
     retryCount = 0;
     stepIndex = 0;
     conveyorPending = false;
+    conveyorAdvances = 0;
     haveActive = true;
     manipulatorAtHome = false;
     stepCount = 0;
@@ -150,9 +257,15 @@ void startNextOrder() {
 
 bool prepareDrink() {
     activeOrder.startSlot = inv_nextSlot(activeOrder.shelfId);
-    stepCount = planOrder(activeOrder, steps, 8);
+#if SMART_PLANNER
+    stepCount = planOrderSmart(activeOrder, steps, PLAN_SIZE);
+#else
+    stepCount = planOrder(activeOrder, steps, PLAN_SIZE);
+#endif
     stepIndex = 0;
-    return stepCount == 8;
+    eb_drinkStart(static_cast<uint8_t>(drinkIndex + 1),
+                  activeOrder.quantity, activeOrder.startSlot);
+    return stepCount > 0;
 }
 
 void dispatchCurrent() {
@@ -160,6 +273,7 @@ void dispatchCurrent() {
     if (!haveActive) return;
     if (conveyorPending) {
         const uint8_t command = conveyorCodeForShelf(activeOrder.shelfId);
+        eb_step(CONVEYOR_STEP, 0, DIR_Y, command);
         pd_send(DIR_Y, command);
     } else {
         if (stepCount == 0 && !prepareDrink()) {
@@ -167,50 +281,143 @@ void dispatchCurrent() {
             Serial.println(F("ERR unable to plan order"));
             return;
         }
-        const ActionStep& step = steps[stepIndex];
-        pd_send(step.dir, step.data);
+#if SMART_PLANNER
+        // The smart planner flagged no-op moves at
+        // plan time. Walk the plan in order: trace
+        // each skipped entry, then dispatch the next
+        // real command. Actions are never flagged and
+        // the plan ends on DOOR_CLOSE, so this always
+        // lands on an entry that is sent — and a
+        // skipped entry never arms the READY wait.
+        while (stepIndex < PLAN_SIZE && steps[stepIndex].skip) {
+            eb_stepSkip(static_cast<uint8_t>(stepIndex + 1),
+                        stepCount, steps[stepIndex].axis,
+                        steps[stepIndex].data);
+            ++stepIndex;
+        }
+#endif
+        const Cmd& step = steps[stepIndex];
+        const uint8_t dir = step.axis == 'X' ? DIR_X : DIR_Y;
+        eb_step(static_cast<uint8_t>(stepIndex + 1), stepCount,
+                dir, static_cast<uint8_t>(step.data));
+        pd_send(dir, static_cast<uint8_t>(step.data));
     }
     state = State::WAITING_FOR_READY;
+    manualReadyPending = pd_isSimulation();
     readyDeadline = millis() + READY_TIMEOUT_MS;
+    dispatchTime = millis();
     noteProgress();
 }
 
 void finishPrimitive() {
     if (conveyorPending) {
-        inv_resetSlots(activeOrder.shelfId);
+        // The conveyor advance settled: the row wrapped,
+        // so the shelf restarts from the first slot.
+        st_noteStep(DIR_Y, conveyorCodeForShelf(activeOrder.shelfId));
+#if SMART_PLANNER
+        // The belt shifted every column by one slot:
+        // the X mapping resets to the dispensing area,
+        // the shelf the manipulator sits on is unchanged.
+        pl_noteConveyorSettled();
+#endif
+        const uint8_t shelf = activeOrder.shelfId;
+        inv_resetSlots(shelf);
         conveyorPending = false;
+        ++conveyorAdvances;
+        eb_nextSlot(shelf, SLOT_FIRST);
+        eb_drinkEnd();
         if (drinkIndex >= activeOrder.quantity) {
             oq_markDispensed();
             haveActive = false;
             manipulatorAtHome = true;
-            Serial.println(F("ORDER COMPLETE"));
+            eb_orderDone(activeOrder.shelfId, activeOrder.quantity,
+                         conveyorAdvances, inv_nextSlot(activeOrder.shelfId));
             state = State::IDLE;
             if (autoRun) dispatchCurrent();
             return;
         }
         stepCount = 0;
-    } else if (++stepIndex >= stepCount) {
-        ++drinkIndex;
-        retryCount = 0;
-        ws_publishDrinkOutcome(activeOrder.orderId, drinkIndex, "ok");
-        inv_setNextSlot(activeOrder.shelfId, static_cast<uint8_t>(inv_nextSlot(activeOrder.shelfId) + 1));
-        if (inv_shouldAdvance(activeOrder.shelfId)) {
-            conveyorPending = true;
-        } else if (drinkIndex >= activeOrder.quantity) {
-            oq_markDispensed();
-            haveActive = false;
-            manipulatorAtHome = true;
-            Serial.println(F("ORDER COMPLETE"));
-            state = State::IDLE;
-            if (autoRun) dispatchCurrent();
-            return;
-        } else {
-            stepCount = 0;
+    } else {
+        // The planned primitive settled: fold it into the tracked
+        // physical state before the step counter advances, so a
+        // primitive that times out and is retried is never noted.
+        const uint8_t dir =
+            steps[stepIndex].axis == 'X' ? DIR_X : DIR_Y;
+        const uint8_t data =
+            static_cast<uint8_t>(steps[stepIndex].data);
+        st_noteStep(dir, data);
+#if SMART_PLANNER
+        // The planner tracks the settled position so a
+        // later move to the same target is a no-op.
+        pl_noteSettled(dir, data);
+#endif
+        // The plan always ends on DOOR_CLOSE, so the
+        // drink completes when the last entry settles.
+        if (++stepIndex >= PLAN_SIZE) {
+            ++drinkIndex;
+            retryCount = 0;
+            eb_drinkOk(activeOrder.orderId, drinkIndex);
+            publishDrinkOutcome(activeOrder.orderId, drinkIndex, "ok");
+            const uint8_t shelf = activeOrder.shelfId;
+            const uint8_t next = static_cast<uint8_t>(inv_nextSlot(shelf) + 1);
+            inv_setNextSlot(shelf, next);
+            eb_nextSlot(shelf, next);
+            if (inv_shouldAdvance(shelf)) {
+                eb_conveyorCheck(next, SLOTS_PER_SHELF, true);
+                conveyorPending = true;
+            } else {
+                eb_conveyorCheck(next, SLOTS_PER_SHELF, false);
+                eb_drinkEnd();
+                if (drinkIndex >= activeOrder.quantity) {
+                    oq_markDispensed();
+                    haveActive = false;
+                    manipulatorAtHome = true;
+                    eb_orderDone(activeOrder.shelfId, activeOrder.quantity,
+                                 conveyorAdvances,
+                                 inv_nextSlot(activeOrder.shelfId));
+                    state = State::IDLE;
+                    if (autoRun) dispatchCurrent();
+                    return;
+                }
+                stepCount = 0;
+            }
         }
     }
     state = State::IDLE;
     noteProgress();
     if (autoRun) dispatchCurrent();
+}
+
+// Name of a pick-routine phase for its instruction
+// trace line.
+const char* routinePhaseName(uint8_t data) {
+    switch (data) {
+    case SIM_Z_EXTEND: return "EXTEND";
+    case SIM_GRIP_CLOSE: return "PICK";
+    case SIM_Z_RETRACT: return "RETRACT";
+    default: return "STEP";
+    }
+}
+
+// Dispatches the routine phase at routineIndex through
+// the manual-step path. Every phase of the routine is
+// an instruction, so it is recorded in the system log
+// as it dispatches.
+void dispatchRoutinePhase() {
+    manualDir = DIR_Y;
+    manualData = routine[routineIndex];
+    manualPending = true;
+    pd_send(manualDir, manualData);
+    state = State::WAITING_FOR_READY;
+    readyDeadline = millis() + READY_TIMEOUT_MS;
+    dispatchTime = millis();
+    noteProgress();
+    manualReadyPending = pd_isSimulation();
+    char line[64];
+    snprintf(line, sizeof(line),
+             "Instruction from ESP: Z AXIS %s",
+             routinePhaseName(manualData));
+    eb_log(line);
 }
 
 void executeCommand(char* command) {
@@ -239,12 +446,7 @@ void executeCommand(char* command) {
     } else if (!strcmp(op, "STATUS")) {
         printStatus();
     } else if (!strcmp(op, "RESET")) {
-        oq_clear();
-        inv_resetAll();
-        haveActive = false;
-        conveyorPending = false;
-        autoRun = false;
-        state = State::IDLE;
+        resetMachine();
         Serial.println(F("OK reset"));
     } else if (!strcmp(op, "SIM") && arg) {
         if (!strcmp(arg, "ON")) {
@@ -255,6 +457,29 @@ void executeCommand(char* command) {
             Serial.println(F("OK sim off"));
         } else {
             Serial.println(F("ERR sim expects on or off"));
+        }
+    } else if (!strcmp(op, "LED") && arg) {
+        for (char* p = arg; *p; ++p) {
+            if (*p >= 'a' && *p <= 'z') *p = static_cast<char>(*p - 'a' + 'A');
+        }
+        if (!strcmp(arg, "ON")) {
+            st_setLedMode(LedMode::ON);
+            Serial.println(F("OK led on"));
+        } else if (!strcmp(arg, "OFF")) {
+            st_setLedMode(LedMode::OFF);
+            Serial.println(F("OK led off"));
+        } else {
+            Serial.println(F("ERR led expects on or off"));
+        }
+    } else if (!strcmp(op, "STALL") && arg) {
+        if (!strcmp(arg, "ON")) {
+            pd_setStall(true);
+            Serial.println(F("OK stall on"));
+        } else if (!strcmp(arg, "OFF")) {
+            pd_setStall(false);
+            Serial.println(F("OK stall off"));
+        } else {
+            Serial.println(F("ERR stall expects on or off"));
         }
     } else if (!strcmp(op, "RUN")) {
         autoRun = true;
@@ -271,10 +496,6 @@ void executeCommand(char* command) {
             dispatchCurrent();
         }
     } else if (!strcmp(op, "ORDER")) {
-        if (busy() || haveActive) {
-            Serial.println(F("ERR busy"));
-            return;
-        }
         Order parsed[ORDER_QUEUE_CAPACITY]{};
         uint8_t parsedCount = 0;
         char* group = payload;
@@ -302,7 +523,15 @@ void executeCommand(char* command) {
             return;
         }
         for (uint8_t i = 0; i < parsedCount; ++i) {
-            oq_enqueue(parsed[i].shelfId, parsed[i].quantity, parsed[i].startSlot);
+            const char* error = submitOrder(parsed[i].shelfId,
+                                              parsed[i].quantity,
+                                              parsed[i].startSlot,
+                                              parsed[i].orderId);
+            if (error) {
+                Serial.print(F("ERR "));
+                Serial.println(error);
+                return;
+            }
         }
         Serial.print(F("OK order groups="));
         Serial.println(parsedCount);
@@ -324,8 +553,12 @@ void sm_init() {
     autoRun = false;
     haveActive = false;
     conveyorPending = false;
+    conveyorAdvances = 0;
     manipulatorAtHome = true;
     retryCount = 0;
+    routineActive = false;
+    routineCount = 0;
+    routineIndex = 0;
     noteProgress();
     oq_clear();
     inv_resetAll();
@@ -337,30 +570,89 @@ void sm_init() {
 #endif
     );
     pd_init();
+    st_updateLed();
+#if SMART_PLANNER
+    // Boot: the position is unknown until endstops
+    // or a settled move confirm it.
+    pl_resetTracking();
+#endif
     sched_init();
 }
 
 void sm_update() {
     sched_update();
     if (state == State::WAITING_FOR_READY && pd_readyReceived()) {
-        finishPrimitive();
+        eb_ready(millis() - dispatchTime);
+        manualReadyPending = false;
+        if (manualPending) {
+            manualPending = false;
+            st_noteStep(manualDir, manualData);
+#if SMART_PLANNER
+            // A manual move settles the tracked
+            // position too, so a later order can
+            // skip a move the operator already
+            // performed by hand.
+            pl_noteSettled(manualDir, manualData);
+#endif
+            if (routineActive && routineIndex + 1 < routineCount) {
+                // The routine continues: dispatch the
+                // next phase and hold it for READY.
+                ++routineIndex;
+                dispatchRoutinePhase();
+            } else {
+                routineActive = false;
+                state = State::IDLE;
+                noteProgress();
+            }
+        } else {
+            finishPrimitive();
+        }
+    } else if (manualReadyPending) {
+        // Operator-gated: the machine holds the current
+        // primitive until the READY button releases it —
+        // no timeout, no retry, no halt.
+    } else if (manualPending &&
+               static_cast<int32_t>(millis() - readyDeadline) >= 0) {
+        // A manual primitive has no drink to retry: drop
+        // back to IDLE so the next instruction can run.
+        manualPending = false;
+        state = State::IDLE;
+        noteProgress();
+        eb_log("manual move timed out — READY not received");
     } else if (state == State::WAITING_FOR_READY &&
                static_cast<int32_t>(millis() - readyDeadline) >= 0) {
         ++retryCount;
         if (retryCount <= DRINK_RETRY_LIMIT) {
-            Serial.print(F("[DISPENSE] retry "));
-            Serial.println(retryCount);
+            // The whole drink is retried from step 1 at the
+            // same slot: nextSlot is only advanced once the
+            // final step settles, so a timeout never skips a
+            // slot. The conveyor advance is step 9 and warns
+            // without the /8 denominator.
+            if (conveyorPending) {
+                eb_warn(CONVEYOR_STEP, 0, retryCount,
+                        DRINK_RETRY_LIMIT);
+            } else {
+                eb_warn(static_cast<uint8_t>(stepIndex + 1),
+                        stepCount, retryCount, DRINK_RETRY_LIMIT);
+            }
             state = State::IDLE;
             stepCount = 0;
             stepIndex = 0;
             noteProgress();
             if (autoRun) dispatchCurrent();
         } else {
-            Serial.println(F("[DISPENSE] drink failed after 3 retries"));
-            ws_publishDrinkOutcome(activeOrder.orderId, drinkIndex + 1, "failed");
+            eb_error(DRINK_RETRY_LIMIT, HALT_ON_DRINK_FAILURE);
+            publishDrinkOutcome(activeOrder.orderId, drinkIndex + 1,
+                                "failed");
             if (HALT_ON_DRINK_FAILURE) {
                 state = State::ERROR;
                 autoRun = false;
+                st_noteError();
+#if SMART_PLANNER
+                // E-stop: the position is no longer
+                // trustworthy.
+                pl_resetTracking();
+#endif
             } else {
                 ++drinkIndex;
                 retryCount = 0;
@@ -370,7 +662,10 @@ void sm_update() {
                     oq_markDispensed();
                     haveActive = false;
                     manipulatorAtHome = true;
-                    Serial.println(F("ORDER COMPLETE"));
+                    eb_orderDone(activeOrder.shelfId,
+                                 activeOrder.quantity,
+                                 conveyorAdvances,
+                                 inv_nextSlot(activeOrder.shelfId));
                 } else if (autoRun) {
                     dispatchCurrent();
                 }
@@ -381,8 +676,24 @@ void sm_update() {
                    ORDER_TIMEOUT_MS) {
         state = State::ERROR;
         autoRun = false;
+        st_noteError();
+#if SMART_PLANNER
+        // E-stop: the position is no longer
+        // trustworthy.
+        pl_resetTracking();
+#endif
         Serial.println(F("ERR order timeout; reset required"));
     }
+    // The machine drains its queue on its own: an order
+    // submitted from any door starts as soon as the
+    // manipulator is free, so the sim page needs no
+    // separate run command to see the full trace.
+    if (state == State::IDLE && !haveActive && oq_hasNext()) {
+        autoRun = true;
+        dispatchCurrent();
+    }
+    st_updateLed();
+    eb_state();
 }
 
 State sm_state() { return state; }
@@ -391,7 +702,70 @@ bool sm_hasActiveOrder() { return haveActive; }
 Order sm_activeOrder() { return activeOrder; }
 uint8_t sm_drinkIndex() { return drinkIndex; }
 uint8_t sm_stepIndex() { return stepIndex; }
+uint32_t sm_conveyorAdvances() { return conveyorAdvances; }
 const char* sm_stateName() { return stateName(); }
 const char* sm_stateName(State value) { return stateName(value); }
+
+const char* sm_submitOrder(uint8_t shelfId, uint8_t quantity,
+                               uint8_t startSlot, const char* orderId) {
+    return submitOrder(shelfId, quantity, startSlot, orderId);
+}
+
+void sm_reset() { resetMachine(); }
+
+// READY button release. Guards on the waiting flag so a
+// press between primitives logs the signal without
+// arming a stray READY for the next dispatch.
+bool sm_signalReady() {
+    if (state != State::WAITING_FOR_READY || !manualReadyPending) {
+        return false;
+    }
+    manualReadyPending = false;
+    pd_signalReady();
+    return true;
+}
+
+// Manual single-primitive dispatch. The control panel sends
+// absolute targets; the direction is carried by the caller's
+// instruction, the machine simply moves to the target.
+const char* sm_manualStep(uint8_t dir, uint8_t data) {
+    if (state == State::ERROR) {
+        return "machine halted; send reset";
+    }
+    if (state != State::IDLE || haveActive || oq_hasNext()) {
+        return "machine busy";
+    }
+    manualDir = dir;
+    manualData = data;
+    manualPending = true;
+    pd_send(dir, data);
+    state = State::WAITING_FOR_READY;
+    readyDeadline = millis() + READY_TIMEOUT_MS;
+    dispatchTime = millis();
+    noteProgress();
+    manualReadyPending = pd_isSimulation();
+    return nullptr;
+}
+
+// SIM_MODE pick routine: extend the manipulator, pick
+// the drink, then retract. Each phase dispatches as its
+// own primitive and holds for the operator's READY
+// button, so the full sequence is three gated steps.
+const char* sm_startPickRoutine() {
+    if (state == State::ERROR) {
+        return "machine halted; send reset";
+    }
+    if (state != State::IDLE || haveActive || oq_hasNext()) {
+        return "machine busy";
+    }
+    routine[0] = SIM_Z_EXTEND;
+    routine[1] = SIM_GRIP_CLOSE;
+    routine[2] = SIM_Z_RETRACT;
+    routineCount = 3;
+    routineIndex = 0;
+    routineActive = true;
+    dispatchRoutinePhase();
+    return nullptr;
+}
 
 }  // namespace revov

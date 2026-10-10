@@ -1,14 +1,11 @@
 #include "PinDriver.h"
 
-#include "../../shared/RevoVProtocol.h"
 #include "../Config.h"
 #include "ReadyHandler.h"
 
 namespace revov {
 namespace {
 bool simulation = false;
-
-const char* directionName(uint8_t dir) { return dir == DIR_X ? "X" : "Y"; }
 
 }
 
@@ -21,6 +18,7 @@ void pd_init() {
     pinMode(PIN_ESP_DATA3, OUTPUT);
     pinMode(PIN_ESP_STROBE, OUTPUT);
     pinMode(PIN_ESP_READY, INPUT);
+    pinMode(PIN_LED, OUTPUT);
 #endif
     rh_setSimulation(simulation);
 }
@@ -30,39 +28,35 @@ void pd_setSimulation(bool enabled) {
     rh_setSimulation(enabled);
 }
 
+void pd_setStall(bool enabled) {
+    rh_setStall(enabled);
+}
+
+void pd_setLed(bool on) {
+#ifdef ARDUINO
+    digitalWrite(PIN_LED, on ? HIGH : LOW);
+#else
+    (void)on;
+#endif
+}
+
+void pd_signalReady() {
+    // Operator READY button: arms the simulated READY
+    // the machine is holding for. A no-op in production,
+    // where the real Mega signals READY on the input pin.
+    rh_scheduleSimulation();
+}
+
 bool pd_isSimulation() { return simulation; }
 
 void pd_send(uint8_t dir, uint8_t data) {
 #ifdef SIM_MODE
     if (simulation) {
-        Serial.print(F("[SIM] -> Mega: DIR="));
-        Serial.print(directionName(dir));
-        Serial.print(F(" DATA="));
-        Serial.print(data);
-        Serial.print(F(" ("));
-        if (dir == DIR_X) {
-            Serial.print(F("move X to slot "));
-            Serial.print(data);
-        } else if (data < SHELF_COUNT) {
-            Serial.print(F("move Y to shelf "));
-            Serial.print(data);
-        } else if (data == ACTION_PICK) {
-            Serial.print(F("PICK"));
-        } else if (data == ACTION_PLACE) {
-            Serial.print(F("PLACE"));
-        } else if (data == ACTION_DOOR_OPEN) {
-            Serial.print(F("DOOR OPEN"));
-        } else if (data == ACTION_DOOR_CLOSE) {
-            Serial.print(F("DOOR CLOSE"));
-        } else if (data >= ACTION_CONVEYOR_FIRST && data <= ACTION_CONVEYOR_LAST) {
-            Serial.print(F("ADVANCE CONVEYOR"));
-            Serial.print(F(" SHELF "));
-            Serial.print(data - ACTION_CONVEYOR_FIRST + 1);
-        } else {
-            Serial.print(F("move Y"));
-        }
-        Serial.println(F(")"));
-        rh_scheduleSimulation();
+        // The event bus owns the command trace line. The
+        // READY is operator-gated: the machine holds each
+        // primitive until the READY button releases it
+        // through pd_signalReady(), so the simulation
+        // schedules nothing here.
         return;
     }
 #endif

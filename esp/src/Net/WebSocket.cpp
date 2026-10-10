@@ -61,9 +61,9 @@ bool parseOrder(JsonObjectConst object, Order& order, const char* orderId) {
     const int shelf = object["shelfId"].as<int>();
     const int quantity = object["quantity"].as<int>();
     const int startSlot = object["startSlot"].as<int>();
-    if (shelf < 1 || shelf > SHELF_COUNT || quantity < 1 ||
-        quantity > MAX_ORDER_QUANTITY || startSlot < 0 ||
-        startSlot >= SLOTS_PER_SHELF) {
+    if (shelf < SHELF_FIRST || shelf > SHELF_LAST ||
+        quantity < 1 || quantity > MAX_ORDER_QUANTITY ||
+        startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
         return false;
     }
     order = {};

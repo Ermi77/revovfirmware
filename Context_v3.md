@@ -19,7 +19,12 @@ WebSocket Secure text frame. An order contains one or more triplets:
 | --- | --- | --- |
 | `shelfId` | 1-5 | Drink type and source shelf |
 | `quantity` | 1-255 | Number of drinks; conveyor rollover is automatic |
-| `startSlot` | 0-9 | First X slot of the first drink only |
+| `startSlot` | 1-10 | First X slot of the first drink only |
+
+Shelves are numbered 1-5 with no index 0. Slots are numbered
+1-10; index 0 is the dedicated dispensing area at a corner of
+the third shelf, reserved strictly for dispensing and never a
+valid location to pick up drinks.
 
 The ESP validates each triplet and places it in `OrderQueue`. The ESP state
 machine starts one order, and `Planner` expands each drink into eight
@@ -27,7 +32,7 @@ primitive commands:
 
 ```text
 (X, source slot)
-(Y, shelfId - 1)
+(Y, shelfId)
 (Y, 6) PICK
 (Y, 3) move to dispense shelf
 (X, 0) move to dispense slot
@@ -41,10 +46,16 @@ executes it with non-blocking stepper and servo updates, and reports READY
 only when the primitive is settled. The ESP then sends the next primitive.
 
 After every drink, the ESP increments `nextSlot` for that shelf. When the
-counter becomes greater than 9, it sends the shelf conveyor command
+counter becomes greater than 10, it sends the shelf conveyor command
 `(Y, conveyorCodeForShelf(shelfId))`, waits for READY, resets that shelf to
-slot 0, and continues. This also happens after the final drink if that drink
-used slot 9. Unused slots remain available to the next order.
+slot 1, and continues. The row therefore serves slots 1 through 10 before
+wrapping, and the counter transiently reaches 11. This also happens after the
+final drink if that drink used slot 10. Unused slots remain available to the
+next order.
+
+After the final drink settles (and its conveyor check, if any), the ESP prints
+an `ORDER COMPLETE` banner summarising the shelf, drinks dispensed, conveyor
+advances, and final `nextSlot`, then auto-starts the next queued order.
 
 The Mega performs homing in this order:
 
@@ -66,6 +77,12 @@ The ESP32 project is [esp/](esp/). Its main loop:
 4. Advances the state machine and READY timeout logic.
 5. Prints changed-only status and periodic heap diagnostics.
 
+A `StateTracker` mirror of the settled physical state (X slot, Y
+shelf, Z and door positions, LED) updates as each primitive settles.
+The serial `status` line reports it as `x=`, `y=`, `z=`, `door=`,
+and `led=`; the `led auto | on | off` command selects the LED mode,
+and `auto` follows the machine state.
+
 The ESP uses `SIM_MODE` to exercise the complete order flow without a Mega,
 actuators, or Wi-Fi. Simulation prints each command and generates a simulated
 READY response.
@@ -76,9 +93,11 @@ insecure fallback. Every incoming frame refreshes the backend-contact timer.
 Credential rejection is checked once per received object or array and logged
 once per failure episode.
 
-The ESP READY timeout is 30 seconds. A primitive timeout has a three-retry
-budget; after exhaustion the ESP publishes a failed outcome and halts when
-`HALT_ON_DRINK_FAILURE` is enabled.
+The ESP READY timeout is 30 seconds. A primitive timeout retries the whole
+drink from step 1 at the same slot (the conveyor advance is step 9), up to
+three times; after exhaustion the ESP publishes a failed outcome and halts when
+`HALT_ON_DRINK_FAILURE` is enabled. The sim console's `stall` command suppresses
+the simulated READY to exercise this timeout/retry/halt path.
 
 ## 3. Mega responsibilities
 
@@ -106,13 +125,18 @@ ESP:
 ```text
 help
 order <shelfId> <quantity> <startSlot>
-order 5 2 4 ; 2 1 0 ; 3 3 7
+order 5 2 4 ; 2 1 1 ; 3 3 7
 status
 run
 step
 reset
 sim on
 sim off
+led auto
+led on
+led off
+stall on
+stall off
 ```
 
 Mega bench console at 115200 baud:

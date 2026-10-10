@@ -80,12 +80,16 @@ void ax_init() {
    setupSwitch(DISPENSE_SWITCH);
 }
 void ax_moveX(uint8_t slot) {
-    if (slot < SLOTS_PER_SHELF) xAxis.moveTo(static_cast<long>(slot) * X_STEPS_PER_SLOT);
+    // Slot 0 is the dispensing area; slots
+    // 1..SLOTS_PER_SHELF are the pickup locations.
+    if (slot <= SLOT_LAST) xAxis.moveTo(static_cast<long>(slot) * X_STEPS_PER_SLOT);
 }
 void ax_moveXSteps(long steps) { xAxis.move(steps); }
 void ax_moveY(uint8_t shelf) {
-   if (shelf < SHELF_COUNT) {
-       const long target = static_cast<long>(shelf) * Y_STEPS_PER_SHELF;
+   // Shelves are numbered 1..SHELF_COUNT with no
+   // index 0; shelf 1 sits at the homed position.
+   if (shelf >= SHELF_FIRST && shelf <= SHELF_LAST) {
+       const long target = static_cast<long>(shelf - SHELF_FIRST) * Y_STEPS_PER_SHELF;
        yAxis1.moveTo(target);
        yAxis2.moveTo(target);
    }
