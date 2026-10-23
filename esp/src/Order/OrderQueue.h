@@ -6,6 +6,8 @@ namespace revov {
 
 void oq_enqueue(uint8_t shelfId, uint8_t qty, uint8_t startSlot);
 void oq_enqueueOrder(const Order& order);
+// Internal: submit a pre-built Order (with items) to the queue
+void oq_submitOrder(const Order& order);
 bool oq_hasNext();
 Order oq_peek();
 void oq_markDispensed();

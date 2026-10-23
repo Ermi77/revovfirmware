@@ -28,6 +28,13 @@ void oq_enqueueOrder(const Order& order) {
     ++count;
 }
 
+void oq_submitOrder(const Order& order) {
+    if (count >= ORDER_QUEUE_CAPACITY) return;
+    queue[tail] = order;
+    tail = static_cast<uint8_t>((tail + 1) % ORDER_QUEUE_CAPACITY);
+    ++count;
+}
+
 bool oq_hasNext() { return count != 0; }
 
 Order oq_peek() {

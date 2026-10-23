@@ -16,9 +16,8 @@ int8_t curY_shelf = -1;
 // Fills the fixed eight-entry plan for one drink.
 // The skip flags are cleared here; the smart planner
 // sets them in its filter pass.
-void fillPlan(const Order& order, Cmd* steps) {
-    const uint8_t shelf = static_cast<uint8_t>(order.shelfId);
-    steps[0] = {'X', static_cast<int8_t>(order.startSlot),
+void fillPlan(uint8_t shelf, uint8_t startSlot, Cmd* steps) {
+    steps[0] = {'X', static_cast<int8_t>(startSlot),
                 "move X to slot", false};
     steps[1] = {'Y', static_cast<int8_t>(shelf),
                 "move Y to shelf", false};
@@ -41,34 +40,25 @@ bool isShelfMove(int8_t data) {
 
 }  // namespace
 
-uint8_t planOrder(const Order& order, Cmd* steps,
+uint8_t planOrder(uint8_t shelfId, uint8_t startSlot, Cmd* steps,
                    uint8_t maxSteps) {
-    // CONVEYOR_RULE: a mid-order drink may land on slot
-    // SLOTS_PER_SHELF (10), the last slot of the row,
-    // because the row serves slots 1..10 before wrapping.
-    // Slot 0 is the dispensing area and is never a valid
-    // pickup location, so only a start slot below 1 or
-    // past the row (11+) is rejected here; order intake
-    // caps the first drink at 1..10 through submitOrder().
-    if (!steps || maxSteps < PLAN_SIZE || order.shelfId < SHELF_FIRST ||
-        order.shelfId > SHELF_LAST || order.quantity == 0 ||
-        order.startSlot < SLOT_FIRST || order.startSlot > SLOT_LAST) {
+    if (!steps || maxSteps < PLAN_SIZE || shelfId < SHELF_FIRST ||
+        shelfId > SHELF_LAST || startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
         return 0;
     }
-    fillPlan(order, steps);
+    fillPlan(shelfId, startSlot, steps);
     return PLAN_SIZE;
 }
 
 #if SMART_PLANNER
 
-uint8_t planOrderSmart(const Order& order, Cmd* steps,
+uint8_t planOrderSmart(uint8_t shelfId, uint8_t startSlot, Cmd* steps,
                         uint8_t maxSteps) {
-    if (!steps || maxSteps < PLAN_SIZE || order.shelfId < SHELF_FIRST ||
-        order.shelfId > SHELF_LAST || order.quantity == 0 ||
-        order.startSlot < SLOT_FIRST || order.startSlot > SLOT_LAST) {
+    if (!steps || maxSteps < PLAN_SIZE || shelfId < SHELF_FIRST ||
+        shelfId > SHELF_LAST || startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
         return 0;
     }
-    fillPlan(order, steps);
+    fillPlan(shelfId, startSlot, steps);
     // Filter pass: forward-simulate the plan against
     // the tracked position. A move whose target already
     // equals the position is a no-op and is flagged for

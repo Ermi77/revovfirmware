@@ -35,7 +35,7 @@ uint32_t readyDeadline = 0;
 uint32_t lastProgressMs = 0;
 uint32_t dispatchTime = 0;
 uint32_t conveyorAdvances = 0;
-Order activeOrder{0, 0, 0, ""};
+Order activeOrder{};
 Cmd steps[8]{};
 uint8_t stepCount = 0;
 bool manualPending = false;
@@ -163,6 +163,48 @@ const char* submitOrder(uint8_t shelfId, uint8_t quantity,
     return nullptr;
 }
 
+// Submit a pre-built Order (with optional multi-items).
+// Validates the order (first item or legacy fields) and enqueues.
+// Returns nullptr on success, or a static error string.
+const char* submitOrder(const Order& order) {
+    if (state == State::ERROR) {
+        return "machine halted; send reset";
+    }
+    if (oq_size() >= ORDER_QUEUE_CAPACITY) {
+        return "order queue full";
+    }
+    // Validate first item or legacy fields
+    uint8_t shelfId = orderIsMultiItem(order) ? order.items[0].shelfId : order.shelfId;
+    uint8_t quantity = orderIsMultiItem(order) ? order.items[0].quantity : order.quantity;
+    uint8_t startSlot = orderIsMultiItem(order) ? order.items[0].startSlot : order.startSlot;
+    
+    if (shelfId < 1 || shelfId > SHELF_COUNT) {
+        return "shelfId must be 1..5";
+    }
+    if (quantity < 1 || quantity > MAX_ORDER_QUANTITY) {
+        return "quantity must be 1..255";
+    }
+    if (startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
+        return "startSlot must be 1..10";
+    }
+    // Validate all items if multi-item
+    if (orderIsMultiItem(order)) {
+        for (uint8_t i = 0; i < order.itemCount; ++i) {
+            if (order.items[i].shelfId < 1 || order.items[i].shelfId > SHELF_COUNT) {
+                return "shelfId must be 1..5";
+            }
+            if (order.items[i].quantity < 1 || order.items[i].quantity > MAX_ORDER_QUANTITY) {
+                return "quantity must be 1..255";
+            }
+            if (order.items[i].startSlot < SLOT_FIRST || order.items[i].startSlot > SLOT_LAST) {
+                return "startSlot must be 1..10";
+            }
+        }
+    }
+    oq_submitOrder(order);
+    return nullptr;
+}
+
 // Shared reset body: clears queue and inventory, drops any active
 // order, and returns to IDLE. Callers report their own outcome.
 void resetMachine() {
@@ -205,11 +247,24 @@ void printStatus() {
     Serial.print(oq_size());
     Serial.print(F(" active="));
     if (haveActive) {
-        Serial.print(activeOrder.shelfId);
-        Serial.print(',');
-        Serial.print(activeOrder.quantity);
-        Serial.print(',');
-        Serial.print(activeOrder.startSlot);
+        const OrderItem* currentItem = orderCurrentItem(activeOrder);
+        if (currentItem) {
+            Serial.print(activeOrder.currentItemIndex);
+            Serial.print('/');
+            Serial.print(activeOrder.itemCount);
+            Serial.print(':');
+            Serial.print(currentItem->shelfId);
+            Serial.print(',');
+            Serial.print(currentItem->quantity);
+            Serial.print(',');
+            Serial.print(currentItem->startSlot);
+        } else {
+            Serial.print(activeOrder.shelfId);
+            Serial.print(',');
+            Serial.print(activeOrder.quantity);
+            Serial.print(',');
+            Serial.print(activeOrder.startSlot);
+        }
     } else {
         Serial.print(F("none"));
     }
@@ -240,10 +295,20 @@ void printStatus() {
 void startNextOrder() {
     if (haveActive || !oq_hasNext()) return;
     activeOrder = oq_peek();
-    inv_setNextSlot(activeOrder.shelfId, activeOrder.startSlot);
-    eb_orderStart(activeOrder.shelfId, activeOrder.quantity,
-                  activeOrder.startSlot);
-    eb_nextSlot(activeOrder.shelfId, activeOrder.startSlot);
+    orderResetRuntime(activeOrder);
+    const OrderItem* currentItem = orderCurrentItem(activeOrder);
+    if (currentItem) {
+        inv_setNextSlot(currentItem->shelfId, currentItem->startSlot);
+        eb_orderStart(currentItem->shelfId, orderTotalDrinks(activeOrder),
+                      currentItem->startSlot);
+        eb_nextSlot(currentItem->shelfId, currentItem->startSlot);
+    } else {
+        // Legacy single-item order
+        inv_setNextSlot(activeOrder.shelfId, activeOrder.startSlot);
+        eb_orderStart(activeOrder.shelfId, activeOrder.quantity,
+                      activeOrder.startSlot);
+        eb_nextSlot(activeOrder.shelfId, activeOrder.startSlot);
+    }
     drinkIndex = 0;
     retryCount = 0;
     stepIndex = 0;
@@ -256,15 +321,27 @@ void startNextOrder() {
 }
 
 bool prepareDrink() {
-    activeOrder.startSlot = inv_nextSlot(activeOrder.shelfId);
+    const OrderItem* currentItem = orderCurrentItem(activeOrder);
+    if (currentItem) {
+        activeOrder.startSlot = inv_nextSlot(currentItem->shelfId);
 #if SMART_PLANNER
-    stepCount = planOrderSmart(activeOrder, steps, PLAN_SIZE);
+        stepCount = planOrderSmart(currentItem->shelfId, activeOrder.startSlot, steps, PLAN_SIZE);
 #else
-    stepCount = planOrder(activeOrder, steps, PLAN_SIZE);
+        stepCount = planOrder(currentItem->shelfId, activeOrder.startSlot, steps, PLAN_SIZE);
 #endif
+    } else {
+        // Legacy single-item order
+        activeOrder.startSlot = inv_nextSlot(activeOrder.shelfId);
+#if SMART_PLANNER
+        stepCount = planOrderSmart(activeOrder, steps, PLAN_SIZE);
+#else
+        stepCount = planOrder(activeOrder, steps, PLAN_SIZE);
+#endif
+    }
     stepIndex = 0;
+    uint8_t totalDrinks = orderIsMultiItem(activeOrder) ? orderTotalDrinks(activeOrder) : activeOrder.quantity;
     eb_drinkStart(static_cast<uint8_t>(drinkIndex + 1),
-                  activeOrder.quantity, activeOrder.startSlot);
+                  totalDrinks, activeOrder.startSlot);
     return stepCount > 0;
 }
 
@@ -313,28 +390,39 @@ void finishPrimitive() {
     if (conveyorPending) {
         // The conveyor advance settled: the row wrapped,
         // so the shelf restarts from the first slot.
-        st_noteStep(DIR_Y, conveyorCodeForShelf(activeOrder.shelfId));
+        const uint8_t shelf = orderEffectiveShelf(activeOrder);
+        st_noteStep(DIR_Y, conveyorCodeForShelf(shelf));
 #if SMART_PLANNER
         // The belt shifted every column by one slot:
         // the X mapping resets to the dispensing area,
         // the shelf the manipulator sits on is unchanged.
         pl_noteConveyorSettled();
 #endif
-        const uint8_t shelf = activeOrder.shelfId;
         inv_resetSlots(shelf);
         conveyorPending = false;
         ++conveyorAdvances;
         eb_nextSlot(shelf, SLOT_FIRST);
         eb_drinkEnd();
-        if (drinkIndex >= activeOrder.quantity) {
-            oq_markDispensed();
-            haveActive = false;
-            manipulatorAtHome = true;
-            eb_orderDone(activeOrder.shelfId, activeOrder.quantity,
-                         conveyorAdvances, inv_nextSlot(activeOrder.shelfId));
-            state = State::IDLE;
-            if (autoRun) dispatchCurrent();
-            return;
+        // Check if we've completed all drinks for the current item
+        const OrderItem* currentItem = orderCurrentItem(activeOrder);
+        uint8_t currentItemQty = currentItem ? currentItem->quantity : activeOrder.quantity;
+        if (drinkIndex >= currentItemQty) {
+            // Move to next item if multi-item order
+            if (orderIsMultiItem(activeOrder) && orderAdvanceDrink(activeOrder)) {
+                // Advanced to next item - reset drink index and prepare next drink
+                drinkIndex = 0;
+                stepCount = 0;
+            } else {
+                // Order complete
+                oq_markDispensed();
+                haveActive = false;
+                manipulatorAtHome = true;
+                eb_orderDone(shelf, activeOrder.quantity,
+                             conveyorAdvances, inv_nextSlot(shelf));
+                state = State::IDLE;
+                if (autoRun) dispatchCurrent();
+                return;
+            }
         }
         stepCount = 0;
     } else {
@@ -358,26 +446,37 @@ void finishPrimitive() {
             retryCount = 0;
             eb_drinkOk(activeOrder.orderId, drinkIndex);
             publishDrinkOutcome(activeOrder.orderId, drinkIndex, "ok");
-            const uint8_t shelf = activeOrder.shelfId;
+            const uint8_t shelf = orderEffectiveShelf(activeOrder);
             const uint8_t next = static_cast<uint8_t>(inv_nextSlot(shelf) + 1);
             inv_setNextSlot(shelf, next);
             eb_nextSlot(shelf, next);
+            // Check if we've completed all drinks for the current item
+            const OrderItem* currentItem = orderCurrentItem(activeOrder);
+            uint8_t currentItemQty = currentItem ? currentItem->quantity : activeOrder.quantity;
             if (inv_shouldAdvance(shelf)) {
                 eb_conveyorCheck(next, SLOTS_PER_SHELF, true);
                 conveyorPending = true;
             } else {
                 eb_conveyorCheck(next, SLOTS_PER_SHELF, false);
                 eb_drinkEnd();
-                if (drinkIndex >= activeOrder.quantity) {
-                    oq_markDispensed();
-                    haveActive = false;
-                    manipulatorAtHome = true;
-                    eb_orderDone(activeOrder.shelfId, activeOrder.quantity,
-                                 conveyorAdvances,
-                                 inv_nextSlot(activeOrder.shelfId));
-                    state = State::IDLE;
-                    if (autoRun) dispatchCurrent();
-                    return;
+                if (drinkIndex >= currentItemQty) {
+                    // Move to next item if multi-item order
+                    if (orderIsMultiItem(activeOrder) && orderAdvanceDrink(activeOrder)) {
+                        // Advanced to next item - reset drink index and prepare next drink
+                        drinkIndex = 0;
+                        stepCount = 0;
+                    } else {
+                        // Order complete
+                        oq_markDispensed();
+                        haveActive = false;
+                        manipulatorAtHome = true;
+                        eb_orderDone(shelf, activeOrder.quantity,
+                                     conveyorAdvances,
+                                     inv_nextSlot(shelf));
+                        state = State::IDLE;
+                        if (autoRun) dispatchCurrent();
+                        return;
+                    }
                 }
                 stepCount = 0;
             }
@@ -496,19 +595,24 @@ void executeCommand(char* command) {
             dispatchCurrent();
         }
     } else if (!strcmp(op, "ORDER")) {
-        Order parsed[ORDER_QUEUE_CAPACITY]{};
-        uint8_t parsedCount = 0;
+        OrderItem items[MAX_ORDER_ITEMS]{};
+        uint8_t itemCount = 0;
         char* group = payload;
-        while (group && parsedCount < ORDER_QUEUE_CAPACITY) {
+        while (group && itemCount < MAX_ORDER_ITEMS) {
             char* next = strchr(group, ';');
             if (next) *next++ = '\0';
             const char* errorText = nullptr;
-            if (!parseTriplet(group, parsed[parsedCount], errorText)) {
+            Order parsed{};
+            if (!parseTriplet(group, parsed, errorText)) {
                 Serial.print(F("ERR "));
                 Serial.println(errorText);
                 return;
             }
-            ++parsedCount;
+            // Copy to item array
+            items[itemCount].shelfId = parsed.shelfId;
+            items[itemCount].quantity = parsed.quantity;
+            items[itemCount].startSlot = parsed.startSlot;
+            ++itemCount;
             group = next;
             if (group) {
                 while (*group == ' ' || *group == '\t') ++group;
@@ -518,23 +622,24 @@ void executeCommand(char* command) {
             Serial.println(F("ERR too many order groups"));
             return;
         }
-        if (!parsedCount) {
+        if (!itemCount) {
             Serial.println(F("ERR order requires at least one triplet"));
             return;
         }
-        for (uint8_t i = 0; i < parsedCount; ++i) {
-            const char* error = submitOrder(parsed[i].shelfId,
-                                              parsed[i].quantity,
-                                              parsed[i].startSlot,
-                                              parsed[i].orderId);
-            if (error) {
-                Serial.print(F("ERR "));
-                Serial.println(error);
-                return;
-            }
+        // Build a single multi-item order
+        Order order{};
+        orderFromItems(order, items, itemCount);
+        const char* error = submitOrder(order.shelfId, order.quantity,
+                                        order.startSlot, order.orderId);
+        if (error) {
+            Serial.print(F("ERR "));
+            Serial.println(error);
+            return;
         }
-        Serial.print(F("OK order groups="));
-        Serial.println(parsedCount);
+        // Replace the last enqueued order with the multi-item version
+        oq_submitOrder(order);
+        Serial.print(F("OK order items="));
+        Serial.println(itemCount);
     } else if (arg || arg2) {
         Serial.println(F("ERR unknown command"));
     } else {
@@ -707,8 +812,12 @@ const char* sm_stateName() { return stateName(); }
 const char* sm_stateName(State value) { return stateName(value); }
 
 const char* sm_submitOrder(uint8_t shelfId, uint8_t quantity,
-                               uint8_t startSlot, const char* orderId) {
+                                uint8_t startSlot, const char* orderId) {
     return submitOrder(shelfId, quantity, startSlot, orderId);
+}
+
+const char* sm_submitOrder(const Order& order) {
+    return submitOrder(order);
 }
 
 void sm_reset() { resetMachine(); }

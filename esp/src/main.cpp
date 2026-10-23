@@ -27,7 +27,7 @@ uint8_t lastPrintedQueue = 255;
 bool lastPrintedConnected = false;
 bool lastPrintedActive = false;
 uint8_t lastPrintedStations = 255;
-revov::Order lastPrintedOrder{0, 0, 0, ""};
+revov::Order lastPrintedOrder{};
 uint8_t lastPrintedDrink = 255;
 uint8_t lastPrintedStep = 255;
 uint8_t lastPrintedSlots[revov::SHELF_COUNT] = {255, 255, 255, 255, 255};
@@ -338,16 +338,19 @@ void loop() {
         for (uint8_t i = 0; i < count; ++i) {
             Serial.print(F("[NET] order id="));
             Serial.print(incoming[i].orderId);
-            Serial.print(F(" shelf="));
-            Serial.print(incoming[i].shelfId);
-            Serial.print(F(" qty="));
-            Serial.print(incoming[i].quantity);
-            Serial.print(F(" slot="));
-            Serial.print(incoming[i].startSlot);
+            if (revov::orderIsMultiItem(incoming[i])) {
+                Serial.print(F(" items="));
+                Serial.print(incoming[i].itemCount);
+            } else {
+                Serial.print(F(" shelf="));
+                Serial.print(incoming[i].shelfId);
+                Serial.print(F(" qty="));
+                Serial.print(incoming[i].quantity);
+                Serial.print(F(" slot="));
+                Serial.print(incoming[i].startSlot);
+            }
             Serial.println();
-            const char* error = revov::sm_submitOrder(
-                incoming[i].shelfId, incoming[i].quantity,
-                incoming[i].startSlot, incoming[i].orderId);
+            const char* error = revov::sm_submitOrder(incoming[i]);
             if (error) {
                 Serial.print(F("[NET] order rejected: "));
                 Serial.println(error);

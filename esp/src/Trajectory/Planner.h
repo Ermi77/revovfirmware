@@ -17,7 +17,8 @@ namespace revov {
 constexpr uint8_t PLAN_SIZE = 8;
 
 // Legacy fixed 8-step plan: every command is emitted.
-uint8_t planOrder(const Order& order, Cmd* steps, uint8_t maxSteps);
+// Plans a single drink using explicit parameters (for multi-item orders).
+uint8_t planOrder(uint8_t shelfId, uint8_t startSlot, Cmd* steps, uint8_t maxSteps);
 
 #if SMART_PLANNER
 
@@ -27,7 +28,7 @@ uint8_t planOrder(const Order& order, Cmd* steps, uint8_t maxSteps);
 // the effective number of commands that will be sent;
 // flagged entries stay in the array so the dispatcher
 // traces them in plan order.
-uint8_t planOrderSmart(const Order& order, Cmd* steps,
+uint8_t planOrderSmart(uint8_t shelfId, uint8_t startSlot, Cmd* steps,
                        uint8_t maxSteps);
 
 // Tracked manipulator position. int8_t: -1 = unknown /
@@ -41,6 +42,17 @@ bool pl_shouldMoveY(int8_t targetShelf);
 int8_t pl_curXSlot();
 int8_t pl_curYShelf();
 
+#endif
+
+// Backward-compatible wrappers for legacy single-item orders
+inline uint8_t planOrder(const Order& order, Cmd* steps, uint8_t maxSteps) {
+    return planOrder(orderEffectiveShelf(order), orderEffectiveStartSlot(order), steps, maxSteps);
+}
+
+#if SMART_PLANNER
+inline uint8_t planOrderSmart(const Order& order, Cmd* steps, uint8_t maxSteps) {
+    return planOrderSmart(orderEffectiveShelf(order), orderEffectiveStartSlot(order), steps, maxSteps);
+}
 #endif
 
 }  // namespace revov

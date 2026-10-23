@@ -23,16 +23,20 @@ const char* sm_stateName();
 const char* sm_stateName(State state);
 
 // Single order-intake funnel shared by every door (serial console,
-// sim web page, and WSS backend). Validates the triplet, then places
-// it in the order queue. Returns nullptr on success, or a static
-// error string:
-//   "machine halted; send reset"  (state == ERROR)
-//   "shelfId must be 1..5"
-//   "quantity must be 1..255"
-//   "startSlot must be 1..10"
-//   "order queue full"
-const char* sm_submitOrder(uint8_t shelfId, uint8_t quantity,
-                           uint8_t startSlot, const char* orderId);
+ // sim web page, and WSS backend). Validates the triplet, then places
+ // it in the order queue. Returns nullptr on success, or a static
+ // error string:
+ //   "machine halted; send reset"  (state == ERROR)
+ //   "shelfId must be 1..5"
+ //   "quantity must be 1..255"
+ //   "startSlot must be 1..10"
+ //   "order queue full"
+ const char* sm_submitOrder(uint8_t shelfId, uint8_t quantity,
+                            uint8_t startSlot, const char* orderId);
+
+ // Submit a pre-built Order (with optional multi-items). Validates
+ // and enqueues. Returns nullptr on success, or a static error string.
+ const char* sm_submitOrder(const Order& order);
 
 // Clears the queue, inventory counters, and active order, and returns
 // the machine to IDLE. Shared by the serial RESET command and the sim

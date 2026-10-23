@@ -54,6 +54,43 @@ void rejectCredentials() {
 }
 
 bool parseOrder(JsonObjectConst object, Order& order, const char* orderId) {
+    // Check for multi-item format first
+    JsonArrayConst items = object["items"].as<JsonArrayConst>();
+    if (!items.isNull()) {
+        if (items.size() > MAX_ORDER_ITEMS) {
+            return false;
+        }
+        OrderItem parsedItems[MAX_ORDER_ITEMS]{};
+        uint8_t itemCount = 0;
+        for (JsonVariantConst item : items) {
+            if (!item.is<JsonObjectConst>()) {
+                return false;
+            }
+            JsonObjectConst itemObj = item.as<JsonObjectConst>();
+            if (!itemObj["shelfId"].is<int>() || !itemObj["quantity"].is<int>() ||
+                !itemObj["startSlot"].is<int>()) {
+                return false;
+            }
+            int shelf = itemObj["shelfId"].as<int>();
+            int quantity = itemObj["quantity"].as<int>();
+            int startSlot = itemObj["startSlot"].as<int>();
+            if (shelf < SHELF_FIRST || shelf > SHELF_LAST ||
+                quantity < 1 || quantity > MAX_ORDER_QUANTITY ||
+                startSlot < SLOT_FIRST || startSlot > SLOT_LAST) {
+                return false;
+            }
+            parsedItems[itemCount].shelfId = static_cast<uint8_t>(shelf);
+            parsedItems[itemCount].quantity = static_cast<uint8_t>(quantity);
+            parsedItems[itemCount].startSlot = static_cast<uint8_t>(startSlot);
+            ++itemCount;
+        }
+        if (itemCount == 0) {
+            return false;
+        }
+        orderFromItems(order, parsedItems, itemCount, orderId);
+        return true;
+    }
+    // Legacy single-item format
     if (!object["shelfId"].is<int>() || !object["quantity"].is<int>() ||
         !object["startSlot"].is<int>()) {
         return false;
@@ -70,6 +107,7 @@ bool parseOrder(JsonObjectConst object, Order& order, const char* orderId) {
     order.shelfId = static_cast<uint8_t>(shelf);
     order.quantity = static_cast<uint8_t>(quantity);
     order.startSlot = static_cast<uint8_t>(startSlot);
+    order.isMultiItem = false;
     if (orderId) {
         strncpy(order.orderId, orderId, sizeof(order.orderId) - 1);
         order.orderId[sizeof(order.orderId) - 1] = '\0';
@@ -112,6 +150,7 @@ void onSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
         orderId = root["orderId"] | "";
         JsonArrayConst orders = root["orders"].as<JsonArrayConst>();
         if (!orders.isNull()) {
+            // Batch of single-item orders (legacy format)
             if (orders.size() > ORDER_QUEUE_CAPACITY ||
                 pendingCount + orders.size() > ORDER_QUEUE_CAPACITY) {
                 Serial.println(F("[NET] order rejected: pending buffer full"));
