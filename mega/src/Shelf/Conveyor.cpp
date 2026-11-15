@@ -43,4 +43,11 @@ void conv_setSpeed(uint32_t hz) {
     for (uint8_t i = 0; i < SHELF_COUNT; ++i) conveyors[i].setSpeed(hz);
 }
 
+StepperAxis* conv_getAxis(uint8_t shelfId) {
+    if (shelfId >= 1 && shelfId <= SHELF_COUNT) {
+        return &conveyors[shelfId - 1];
+    }
+    return nullptr;
+}
+
 }  // namespace revov

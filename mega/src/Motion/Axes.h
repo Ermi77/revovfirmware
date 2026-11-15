@@ -4,6 +4,18 @@
 
 namespace revov {
 
+enum AxisId : uint8_t {
+    AXIS_X = 0,
+    AXIS_Y1 = 1,
+    AXIS_Y2 = 2,
+    AXIS_CONVEYOR_1 = 3,
+    AXIS_CONVEYOR_2 = 4,
+    AXIS_CONVEYOR_3 = 5,
+    AXIS_CONVEYOR_4 = 6,
+    AXIS_CONVEYOR_5 = 7,
+    AXIS_COUNT = 8
+};
+
 void ax_init();
 void ax_moveX(uint8_t slot);
 void ax_moveXSteps(long steps);
@@ -27,4 +39,8 @@ long ax_xPosition();
 long ax_yPosition();
 bool ax_xBusy();
 bool ax_yBusy();
+
+// Unified absolute move for any axis
+void stepper_move(uint8_t axisId, int32_t targetPosition);
+
 }  // namespace revov

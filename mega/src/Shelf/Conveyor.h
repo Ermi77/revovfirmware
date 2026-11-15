@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #endif
 
+#include "../../shared/RevoVProtocol.h"
+
 namespace revov {
 
 void conv_init();
@@ -13,4 +15,6 @@ long conv_position(uint8_t shelfId);
 void conv_update(uint32_t nowUs);
 void conv_stop();
 void conv_setSpeed(uint32_t hz);
+StepperAxis* conv_getAxis(uint8_t shelfId); // 1-based shelf ID
+
 }  // namespace revov

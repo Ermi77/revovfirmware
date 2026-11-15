@@ -6,6 +6,7 @@
 #include "../Protocol/PinReader.h"
 #include "../Shelf/Conveyor.h"
 #include "../Homing/Home.h"
+#include "../ServiceMode/ServiceMode.h"
 
 namespace revov {
 
@@ -22,6 +23,7 @@ void sched_update(uint32_t nowUs) {
     ax_updateLimits();
     grip_updateLimits();
     pr_update();
+    svc_update();
 }
 
 }  // namespace revov

@@ -9,6 +9,8 @@
 #include "EventBus.h"
 #include "Scheduler.h"
 #include "StateTracker.h"
+#include "../Sensors/Sensors.h"
+#include "../Gsm/Gsm.h"
 
 #include <Arduino.h>
 #include <stdio.h>
@@ -51,6 +53,11 @@ uint8_t routine[3]{};
 uint8_t routineCount = 0;
 uint8_t routineIndex = 0;
 bool routineActive = false;
+
+// Low voltage monitoring
+bool lowVoltageAlertSent = false;
+uint32_t lastVoltageCheckMs = 0;
+constexpr uint32_t VOLTAGE_CHECK_INTERVAL_MS = 5000;
 
 const char* stateName(State value) {
     switch (value) {
@@ -139,6 +146,9 @@ const char* submitOrder(uint8_t shelfId, uint8_t quantity,
     if (state == State::ERROR) {
         return "machine halted; send reset";
     }
+    if (sensors_isLowVoltage()) {
+        return "battery critically low; machine paused";
+    }
     if (shelfId < 1 || shelfId > SHELF_COUNT) {
         return "shelfId must be 1..5";
     }
@@ -169,6 +179,9 @@ const char* submitOrder(uint8_t shelfId, uint8_t quantity,
 const char* submitOrder(const Order& order) {
     if (state == State::ERROR) {
         return "machine halted; send reset";
+    }
+    if (sensors_isLowVoltage()) {
+        return "battery critically low; machine paused";
     }
     if (oq_size() >= ORDER_QUEUE_CAPACITY) {
         return "order queue full";
@@ -686,6 +699,29 @@ void sm_init() {
 
 void sm_update() {
     sched_update();
+
+    // Low voltage monitoring
+    uint32_t now = millis();
+    if (static_cast<uint32_t>(now - lastVoltageCheckMs) >= VOLTAGE_CHECK_INTERVAL_MS) {
+        lastVoltageCheckMs = now;
+        if (sensors_isLowVoltage()) {
+            if (!lowVoltageAlertSent) {
+                lowVoltageAlertSent = true;
+                const SensorData& sd = sensors_getData();
+                char msg[128];
+                snprintf(msg, sizeof(msg), "[ALERT] Battery critically low: %.1fV. Machine paused.", sd.voltageV);
+                eb_log(msg);
+                gsm_sendLowVoltageAlert(sd.voltageV);
+            }
+            // Pause order processing - don't start new orders
+            if (state == State::IDLE && !haveActive && oq_hasNext()) {
+                // Stay in IDLE, don't dispatch
+            }
+        } else {
+            lowVoltageAlertSent = false;
+        }
+    }
+
     if (state == State::WAITING_FOR_READY && pd_readyReceived()) {
         eb_ready(millis() - dispatchTime);
         manualReadyPending = false;

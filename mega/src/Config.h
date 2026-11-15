@@ -8,33 +8,46 @@ namespace revov {
 constexpr uint8_t PIN_UNUSED = 255;
 
 // Pins
-constexpr uint8_t PIN_X_STEP = 6; // TODO: calibrate
-constexpr uint8_t PIN_X_DIR = 7; // TODO: calibrate
+constexpr uint8_t PIN_X_STEP = 24; // TODO: calibrate
+constexpr uint8_t PIN_X_DIR = 25; // TODO: calibrate
 constexpr uint8_t PIN_X_ENABLE = 255; // TODO: calibrate
-constexpr uint8_t PIN_Y1_STEP = 8; // TODO: calibrate
-constexpr uint8_t PIN_Y1_DIR = 9; // TODO: calibrate
-constexpr uint8_t PIN_Y2_STEP = 26; // TODO: calibrate
-constexpr uint8_t PIN_Y2_DIR = 27; // TODO: calibrate
+constexpr uint8_t PIN_Y1_STEP = 22; // TODO: calibrate
+constexpr uint8_t PIN_Y1_DIR = 23; // TODO: calibrate
+constexpr uint8_t PIN_Y2_STEP = 22; // TODO: calibrate (shared with Y1)
+constexpr uint8_t PIN_Y2_DIR = 23; // TODO: calibrate (shared with Y1)
 constexpr uint8_t PIN_Y_ENABLE = 255; // TODO: calibrate
 constexpr uint8_t PIN_GRIPPER_SERVO = 10; // TODO: calibrate
 constexpr uint8_t PIN_Z_SERVO = 11; // TODO: calibrate
 constexpr uint8_t PIN_DOOR_SERVO = 12; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR1_STEP = 13; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR1_DIR = 14; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR2_STEP = 15; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR2_DIR = 16; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR3_STEP = 17; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR3_DIR = 18; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR4_STEP = 19; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR4_DIR = 20; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR5_STEP = 21; // TODO: calibrate
-constexpr uint8_t PIN_CONVEYOR5_DIR = 22; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR1_STEP = 26; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR1_DIR = 27; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR2_STEP = 28; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR2_DIR = 29; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR3_STEP = 30; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR3_DIR = 31; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR4_STEP = 32; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR4_DIR = 33; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR5_STEP = 34; // TODO: calibrate
+constexpr uint8_t PIN_CONVEYOR5_DIR = 35; // TODO: calibrate
 constexpr uint8_t PIN_CONVEYOR_ENABLE = 255; // TODO: calibrate
+
+// Communication with ESP32 (parallel 4-bit + strobe + ready)
+constexpr uint8_t PIN_ESP_DIR = 47;       // ESP DIR
+constexpr uint8_t PIN_ESP_DATA0 = 48;     // ESP DATA0
+constexpr uint8_t PIN_ESP_DATA1 = 49;     // ESP DATA1
+constexpr uint8_t PIN_ESP_DATA2 = 50;     // ESP DATA2
+constexpr uint8_t PIN_ESP_DATA3 = 51;     // ESP DATA3
+constexpr uint8_t PIN_ESP_STROBE = 52;    // ESP STROBE
+constexpr uint8_t PIN_ESP_READY = 53;     // ESP READY (input from ESP)
 // Limit and safety switches. Assign real pins only after the pin map is locked.
-constexpr uint8_t X_HOME = PIN_UNUSED; // TODO: calibrate
-constexpr uint8_t Y_TOP_LIMIT = PIN_UNUSED; // TODO: calibrate
-constexpr uint8_t Y_BOTTOM_LIMIT = PIN_UNUSED; // TODO: calibrate
-constexpr uint8_t Y_HOME = PIN_UNUSED; // TODO: calibrate
+constexpr uint8_t X_LEFT_LIMIT = PIN_UNUSED; // TODO: calibrate
+constexpr uint8_t X_RIGHT_LIMIT = PIN_UNUSED; // TODO: calibrate
+constexpr uint8_t X_HOME = X_LEFT_LIMIT; // Home position is at left limit
+constexpr uint8_t Y_UP_LIMIT = PIN_UNUSED; // TODO: calibrate
+constexpr uint8_t Y_DOWN_LIMIT = PIN_UNUSED; // TODO: calibrate
+constexpr uint8_t Y_TOP_LIMIT = Y_UP_LIMIT; // Alias for compatibility
+constexpr uint8_t Y_BOTTOM_LIMIT = Y_DOWN_LIMIT; // Alias for compatibility
+constexpr uint8_t Y_HOME = Y_DOWN_LIMIT; // Home position is at down limit
 constexpr uint8_t Z_EXT_LIMIT = PIN_UNUSED; // TODO: calibrate
 constexpr uint8_t Z_RET_LIMIT = PIN_UNUSED; // TODO: calibrate
 constexpr uint8_t Z_HOME = PIN_UNUSED; // TODO: calibrate
@@ -93,5 +106,10 @@ constexpr uint16_t GRIP_CLOSE_DEG = GRIP_DISTANCE_DEG; // TODO: calibrate
 constexpr uint16_t GRIP_HOLD_MS = 200; // TODO: calibrate
 constexpr uint16_t READY_PULSE_MS = 100; // TODO: calibrate
 constexpr uint16_t CMD_MAX_LENGTH = 96; // TODO: calibrate
+
+// Service mode LEDs
+constexpr uint8_t PIN_LED_UP = 2;    // Up warning LED (green - normal operation)
+constexpr uint8_t PIN_LED_DOWN = 3;  // Down warning LED (red - error/maintenance)
+constexpr uint8_t PIN_LED_SERVICE = 4; // Service mode indicator (blue)
 
 }  // namespace revov

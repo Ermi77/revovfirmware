@@ -5,6 +5,7 @@
 #include "../Motion/Axes.h"
 #include "../Shelf/Conveyor.h"
 #include "../Homing/Home.h"
+#include "../ServiceMode/ServiceMode.h"
 #include <Arduino.h>
 #include <string.h>
 #include <stdlib.h>
@@ -39,6 +40,7 @@ void execute(char* text) {
     if (!op) return;
     if (!strcmp(op, "HELP")) {
         Serial.println(F("help; x <slot>; xf/xb <steps>; y <shelf>; yf/yb <steps>; z up/down; grip close/open; pick/place; door open/close; conv 1..5; home; status; speed x/y/conv <hz>; stop"));
+        Serial.println(F("service test|testx|testy|testz|testgrip|testdoor|testconv|testlimits|testleds|refill|exit|ledup on/off/blink|leddown on/off/blink|ledservice on/off|status"));
         return;
     }
     if (!strcmp(op, "STATUS")) {
@@ -133,6 +135,51 @@ void execute(char* text) {
         error(F("bench mode disabled"));
         return;
 #endif
+    }
+    if (!strcmp(op, "SERVICE") && a) {
+        if (!strcmp(a, "TEST")) { svc_enter(ServiceMode::TEST_ALL); Serial.println(F("OK service test started")); return; }
+        if (!strcmp(a, "TESTX")) { svc_enter(ServiceMode::TEST_X); Serial.println(F("OK service test X")); return; }
+        if (!strcmp(a, "TESTY")) { svc_enter(ServiceMode::TEST_Y); Serial.println(F("OK service test Y")); return; }
+        if (!strcmp(a, "TESTZ")) { svc_enter(ServiceMode::TEST_Z); Serial.println(F("OK service test Z")); return; }
+        if (!strcmp(a, "TESTGRIP")) { svc_enter(ServiceMode::TEST_GRIP); Serial.println(F("OK service test GRIP")); return; }
+        if (!strcmp(a, "TESTDOOR")) { svc_enter(ServiceMode::TEST_DOOR); Serial.println(F("OK service test DOOR")); return; }
+        if (!strcmp(a, "TESTCONV")) { svc_enter(ServiceMode::TEST_CONVEYORS); Serial.println(F("OK service test CONVEYORS")); return; }
+        if (!strcmp(a, "TESTLIMITS")) { svc_enter(ServiceMode::TEST_LIMITS); Serial.println(F("OK service test LIMITS")); return; }
+        if (!strcmp(a, "TESTLEDS")) { svc_enter(ServiceMode::TEST_LEDS); Serial.println(F("OK service test LEDS")); return; }
+        if (!strcmp(a, "REFILL")) { svc_enter(ServiceMode::REFILL); Serial.println(F("OK service refill mode")); return; }
+        if (!strcmp(a, "EXIT")) { svc_exit(); Serial.println(F("OK service exit")); return; }
+        if (!strcmp(a, "LEDUP") && b) {
+            if (!strcmp(b, "ON")) svc_setLedUp(true);
+            else if (!strcmp(b, "OFF")) svc_setLedUp(false);
+            else if (!strcmp(b, "BLINK")) svc_blinkLedUp(500);
+            Serial.print(F("OK led up ")); Serial.println(b); return;
+        }
+        if (!strcmp(a, "LEDDOWN") && b) {
+            if (!strcmp(b, "ON")) svc_setLedDown(true);
+            else if (!strcmp(b, "OFF")) svc_setLedDown(false);
+            else if (!strcmp(b, "BLINK")) svc_blinkLedDown(500);
+            Serial.print(F("OK led down ")); Serial.println(b); return;
+        }
+        if (!strcmp(a, "LEDSERVICE") && b) {
+            if (!strcmp(b, "ON")) svc_setLedService(true);
+            else if (!strcmp(b, "OFF")) svc_setLedService(false);
+            Serial.print(F("OK led service ")); Serial.println(b); return;
+        }
+        if (!strcmp(a, "STATUS")) {
+            const TestResult& r = svc_getLastResult();
+            Serial.print(F("SVC x=")); Serial.print(r.xOk);
+            Serial.print(F(" y=")); Serial.print(r.yOk);
+            Serial.print(F(" z=")); Serial.print(r.zOk);
+            Serial.print(F(" grip=")); Serial.print(r.gripOk);
+            Serial.print(F(" door=")); Serial.print(r.doorOk);
+            Serial.print(F(" conv="));
+            for (uint8_t i = 0; i < 5; ++i) { if (i) Serial.print(','); Serial.print(r.conveyorsOk[i]); }
+            Serial.print(F(" limits=")); Serial.print(r.limitsOk);
+            Serial.print(F(" time=")); Serial.print(r.testTimeMs); Serial.println(F("ms"));
+            return;
+        }
+        error(F("service subcommand"));
+        return;
     }
     error(F("command"));
 }

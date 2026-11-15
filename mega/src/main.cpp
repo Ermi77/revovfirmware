@@ -11,6 +11,7 @@
 #include "Motion/ServoController.h"
 #include "Protocol/PinReader.h"
 #include "Shelf/Conveyor.h"
+#include "ServiceMode/ServiceMode.h"
 
 // TODO: implement (Milestone M1)
 void setup() {
@@ -24,6 +25,7 @@ void setup() {
     revov::sv_init();
     revov::sm_init();
     revov::sched_init();
+    revov::svc_init();
 }
 
 void loop() {

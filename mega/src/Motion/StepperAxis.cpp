@@ -58,9 +58,13 @@ void StepperAxis::update(uint32_t nowUs) {
     if (static_cast<int32_t>(nowUs - nextStepUs_) < 0) return;
     const bool forward = velocity_ > 0.0f;
 #ifdef ARDUINO
-    if (dirPin_ != 255) digitalWrite(dirPin_, forward ? HIGH : LOW);
+    if (dirPin_ != 255) {
+        digitalWrite(dirPin_, forward ? HIGH : LOW);
+        delayMicroseconds(5);  // DIR setup time for DM542
+    }
     if (stepPin_ != 255) {
         digitalWrite(stepPin_, HIGH);
+        delayMicroseconds(5);  // Pulse width >= 2.5us for DM542
         digitalWrite(stepPin_, LOW);
     }
 #endif

@@ -1,6 +1,7 @@
 #include "Axes.h"
 
 #include "../Config.h"
+#include "../Shelf/Conveyor.h"
 
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -40,7 +41,8 @@ void setupSwitch(uint8_t pin) {
 #endif
 }
 
-bool previousXHome = false;
+bool previousXLeft = false;
+bool previousXRight = false;
 bool previousYTop = false;
 bool previousYBottom = false;
 bool previousYHome = false;
@@ -65,11 +67,12 @@ void ax_init() {
    xAxis.init();
    yAxis1.init();
    yAxis2.init();
-   setupSwitch(X_HOME);
-   setupSwitch(Y_TOP_LIMIT);
-   setupSwitch(Y_BOTTOM_LIMIT);
-   setupSwitch(Y_HOME);
-   const uint8_t left[] = {SHELF1_L_LIMIT, SHELF2_L_LIMIT, SHELF3_L_LIMIT,
+setupSwitch(X_LEFT_LIMIT);
+    setupSwitch(X_RIGHT_LIMIT);
+    setupSwitch(Y_UP_LIMIT);
+    setupSwitch(Y_DOWN_LIMIT);
+    setupSwitch(Y_HOME);
+    const uint8_t left[] = {SHELF1_L_LIMIT, SHELF2_L_LIMIT, SHELF3_L_LIMIT,
                             SHELF4_L_LIMIT, SHELF5_L_LIMIT};
    const uint8_t right[] = {SHELF1_R_LIMIT, SHELF2_R_LIMIT, SHELF3_R_LIMIT,
                              SHELF4_R_LIMIT, SHELF5_R_LIMIT};
@@ -100,19 +103,21 @@ void ax_homeY() { yAxis1.moveTo(0); yAxis2.moveTo(0); }
 bool ax_isBusy() { return xAxis.isBusy() || yAxis1.isBusy() || yAxis2.isBusy(); }
 void ax_update(uint32_t nowUs) { xAxis.update(nowUs); yAxis1.update(nowUs); yAxis2.update(nowUs); }
 void ax_updateLimits() {
-   const bool xHome = switchActive(X_HOME);
-   const bool yTop = switchActive(Y_TOP_LIMIT);
-   const bool yBottom = switchActive(Y_BOTTOM_LIMIT);
-   const bool yHome = switchActive(Y_HOME);
-   if (xHome && !previousXHome) { xAxis.stop(); logSwitch(F("X_HOME")); }
-   if ((yTop && !previousYTop) || (yBottom && !previousYBottom) ||
-       (yHome && !previousYHome)) {
-       yAxis1.stop();
-       yAxis2.stop();
-       if (yTop && !previousYTop) logSwitch(F("Y_TOP_LIMIT"));
-       if (yBottom && !previousYBottom) logSwitch(F("Y_BOTTOM_LIMIT"));
-       if (yHome && !previousYHome) logSwitch(F("Y_HOME"));
-   }
+    const bool xLeft = switchActive(X_LEFT_LIMIT);
+    const bool xRight = switchActive(X_RIGHT_LIMIT);
+    const bool yUp = switchActive(Y_UP_LIMIT);
+    const bool yDown = switchActive(Y_DOWN_LIMIT);
+    const bool yHome = switchActive(Y_HOME);
+    if (xLeft && !previousXLeft) { xAxis.stop(); logSwitch(F("X_LEFT_LIMIT")); }
+    if (xRight && !previousXRight) { xAxis.stop(); logSwitch(F("X_RIGHT_LIMIT")); }
+    if ((yUp && !previousYTop) || (yDown && !previousYBottom) ||
+        (yHome && !previousYHome)) {
+        yAxis1.stop();
+        yAxis2.stop();
+        if (yUp && !previousYTop) logSwitch(F("Y_UP_LIMIT"));
+        if (yDown && !previousYBottom) logSwitch(F("Y_DOWN_LIMIT"));
+        if (yHome && !previousYHome) logSwitch(F("Y_HOME"));
+    }
    const uint8_t left[] = {SHELF1_L_LIMIT, SHELF2_L_LIMIT, SHELF3_L_LIMIT,
                            SHELF4_L_LIMIT, SHELF5_L_LIMIT};
    const uint8_t right[] = {SHELF1_R_LIMIT, SHELF2_R_LIMIT, SHELF3_R_LIMIT,
@@ -139,10 +144,11 @@ void ax_updateLimits() {
    }
    const bool dispense = switchActive(DISPENSE_SWITCH);
    if (dispense && !previousDispense) logSwitch(F("DISPENSE_SWITCH shelf 3"));
-   previousXHome = xHome;
-   previousYTop = yTop;
-   previousYBottom = yBottom;
-   previousYHome = yHome;
+previousXLeft = xLeft;
+    previousXRight = xRight;
+    previousYTop = yUp;
+    previousYBottom = yDown;
+    previousYHome = yHome;
    previousDispense = dispense;
 }
 void ax_stopAll() { xAxis.stop(); yAxis1.stop(); yAxis2.stop(); }
@@ -162,5 +168,26 @@ long ax_xPosition() { return xAxis.position(); }
 long ax_yPosition() { return yAxis1.position(); }
 bool ax_xBusy() { return xAxis.isBusy(); }
 bool ax_yBusy() { return yAxis1.isBusy() || yAxis2.isBusy(); }
+
+StepperAxis* getAxis(uint8_t axisId) {
+    switch (axisId) {
+        case AXIS_X: return &xAxis;
+        case AXIS_Y1: return &yAxis1;
+        case AXIS_Y2: return &yAxis2;
+        case AXIS_CONVEYOR_1: return conv_getAxis(1);
+        case AXIS_CONVEYOR_2: return conv_getAxis(2);
+        case AXIS_CONVEYOR_3: return conv_getAxis(3);
+        case AXIS_CONVEYOR_4: return conv_getAxis(4);
+        case AXIS_CONVEYOR_5: return conv_getAxis(5);
+        default: return nullptr;
+    }
+}
+
+void stepper_move(uint8_t axisId, int32_t targetPosition) {
+    StepperAxis* axis = getAxis(axisId);
+    if (axis) {
+        axis->moveTo(targetPosition);
+    }
+}
 
 }  // namespace revov

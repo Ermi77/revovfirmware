@@ -5,6 +5,8 @@
 #include "../Core/StateMachine.h"
 #include "../Core/StateTracker.h"
 #include "../Protocol/PinDriver.h"
+#include "../Sensors/Sensors.h"
+#include "../Gsm/Gsm.h"
 
 #ifdef ARDUINO
 #include <ArduinoJson.h>
@@ -327,6 +329,48 @@ void handleCommand(uint8_t num, uint8_t* payload, size_t length) {
         eb_log("Instruction from ESP: RESET");
         sm_reset();
         sendAck(num, "OK reset");
+    } else if (strcmp(type, "sensors") == 0) {
+        // Return current sensor readings
+        const SensorData& sd = sensors_getData();
+        const GsmStatus& gs = gsm_getStatus();
+        StaticJsonDocument<512> doc;
+        doc["type"] = "sensors";
+        doc["temperatureC"] = sd.temperatureC;
+        doc["voltageV"] = sd.voltageV;
+        doc["lowVoltage"] = sd.lowVoltage;
+        doc["sensorError"] = sd.sensorError;
+        doc["gsmState"] = static_cast<int>(gs.state);
+        doc["gsmSignalQuality"] = gs.signalQuality;
+        doc["gsmNetworkRegistered"] = gs.networkRegistered;
+        doc["gsmOperator"] = gs.operatorName;
+        doc["gsmIpAddress"] = gs.ipAddress;
+        doc["gsmHasError"] = gs.hasError;
+        if (gs.hasError) doc["gsmError"] = gs.errorMessage;
+        char buffer[512];
+        sendTo(num, buffer, serializeJson(doc, buffer, sizeof(buffer)));
+    } else if (strcmp(type, "gsm_power") == 0) {
+        // GSM power control: {"type":"gsm_power","action":"on|off|sleep|wake"}
+        JsonVariantConst actionValue = root["action"];
+        if (!actionValue.isNull()) {
+            const char* action = actionValue.as<const char*>();
+            if (strcmp(action, "on") == 0) {
+                gsm_powerOn();
+                sendAck(num, "OK gsm powering on");
+            } else if (strcmp(action, "off") == 0) {
+                gsm_powerOff();
+                sendAck(num, "OK gsm powering off");
+            } else if (strcmp(action, "sleep") == 0) {
+                gsm_sleep();
+                sendAck(num, "OK gsm sleeping");
+            } else if (strcmp(action, "wake") == 0) {
+                gsm_wake();
+                sendAck(num, "OK gsm waking");
+            } else {
+                sendError(num, "gsm_power action must be on|off|sleep|wake");
+            }
+        } else {
+            sendError(num, "gsm_power requires action");
+        }
     } else {
         sendError(num, "unknown command type");
     }
@@ -384,6 +428,27 @@ void webui_init() {
               []() { sendBrand(BRAND_PRODUCT, BRAND_PRODUCT_LEN); });
     server.on("/brand/machine.jpg", HTTP_GET,
               []() { sendBrand(BRAND_MACHINE, BRAND_MACHINE_LEN); });
+    // Sensor data endpoint
+    server.on("/api/sensors", HTTP_GET, []() {
+        const SensorData& sd = sensors_getData();
+        const GsmStatus& gs = gsm_getStatus();
+        StaticJsonDocument<512> doc;
+        doc["temperatureC"] = sd.temperatureC;
+        doc["voltageV"] = sd.voltageV;
+        doc["lowVoltage"] = sd.lowVoltage;
+        doc["sensorError"] = sd.sensorError;
+        doc["lastUpdateMs"] = sd.lastUpdateMs;
+        doc["gsmState"] = static_cast<int>(gs.state);
+        doc["gsmSignalQuality"] = gs.signalQuality;
+        doc["gsmNetworkRegistered"] = gs.networkRegistered;
+        doc["gsmOperator"] = gs.operatorName;
+        doc["gsmIpAddress"] = gs.ipAddress;
+        doc["gsmHasError"] = gs.hasError;
+        if (gs.hasError) doc["gsmError"] = gs.errorMessage;
+        char buffer[512];
+        serializeJson(doc, buffer, sizeof(buffer));
+        httpServer().send(200, "application/json", buffer);
+    });
     // Anything else is a 404. Answering every path with
     // the page makes phones treat RevoV-SIM as a captive
     // portal: their /generate_204 and /hotspot-detect.html

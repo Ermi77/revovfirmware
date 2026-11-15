@@ -17,6 +17,8 @@
 #include "Protocol/ReadyHandler.h"
 #include "Trajectory/Planner.h"
 #include "Web/Ui.h"
+#include "Sensors/Sensors.h"
+#include "Gsm/Gsm.h"
 
 namespace {
 char serialInput[revov::CMD_MAX_LENGTH];
@@ -317,6 +319,10 @@ void setup() {
     revov::eb_init();
     revov::webui_init();
     Serial.println(F("[BOOT] web ui initialized"));
+    revov::sensors_init();
+    Serial.println(F("[BOOT] sensors initialized"));
+    revov::gsm_powerOn();
+    Serial.println(F("[BOOT] gsm powering on"));
     const bool wsStarted = revov::ws_connect();
     Serial.print(F("[BOOT] ws start ok="));
     Serial.println(wsStarted ? 1 : 0);
@@ -329,6 +335,8 @@ void loop() {
     revov::ws_maintain();
     revov::checkBackendContact();
     revov::webui_service();
+    revov::sensors_update();
+    revov::gsm_update();
     revov::Order incoming[revov::ORDER_QUEUE_CAPACITY]{};
     uint8_t count = 0;
     if (revov::ws_pollOrder(incoming, count)) {

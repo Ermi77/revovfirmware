@@ -45,14 +45,26 @@ constexpr const char* SIM_AP_SSID = "RevoV-SIM";
 constexpr const char* SIM_AP_PASSWORD = "revov-sim";
 
 // TODO: verify ESP pin assignments against system context.
-constexpr uint8_t PIN_ESP_DIR = 0;
-constexpr uint8_t PIN_ESP_DATA0 = 0;
-constexpr uint8_t PIN_ESP_DATA1 = 0;
-constexpr uint8_t PIN_ESP_DATA2 = 0;
-constexpr uint8_t PIN_ESP_DATA3 = 0;
-constexpr uint8_t PIN_ESP_STROBE = 0;
-constexpr uint8_t PIN_ESP_READY = 0;
+// Parallel 4-bit communication from Mega (pins 47-53)
+constexpr uint8_t PIN_ESP_DIR = 4;       // Mega 47 -> ESP GPIO4
+constexpr uint8_t PIN_ESP_DATA0 = 5;     // Mega 48 -> ESP GPIO5
+constexpr uint8_t PIN_ESP_DATA1 = 16;    // Mega 49 -> ESP GPIO16
+constexpr uint8_t PIN_ESP_DATA2 = 17;    // Mega 50 -> ESP GPIO17
+constexpr uint8_t PIN_ESP_DATA3 = 18;    // Mega 51 -> ESP GPIO18
+constexpr uint8_t PIN_ESP_STROBE = 19;   // Mega 52 -> ESP GPIO19
+constexpr uint8_t PIN_ESP_READY = 21;    // Mega 53 -> ESP GPIO21 (output from ESP)
 constexpr uint8_t PIN_LED = 2;
+
+// Sensors
+constexpr uint8_t PIN_VOLTAGE_SENSOR = 34;  // ADC1_CH6, input only
+constexpr uint8_t PIN_TEMP_SENSOR = 35;      // ADC1_CH7, input only
+
+// GSM Module (SIM800L or similar)
+constexpr uint8_t PIN_GSM_TX = 1;            // ESP TX -> GSM RX
+constexpr uint8_t PIN_GSM_RX = 3;            // ESP RX -> GSM TX
+constexpr uint8_t PIN_GSM_PWRKEY = 25;       // Power key
+constexpr uint8_t PIN_GSM_RST = 26;          // Reset
+constexpr uint8_t PIN_GSM_DTR = 27;          // DTR (sleep control)
 
 // Station credentials. The sim build joins this
 // network alongside its own access point (AP+STA),
